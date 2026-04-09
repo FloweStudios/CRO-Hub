@@ -173,9 +173,9 @@ function PartnerCard({ partner, onClick }) {
         <div className="card-arrow">→</div>
       </div>
       <div className="card-stats">
-        <div className="stat"><span className="stat-value">{stats ? fmt(stats.pageviews) : '—'}</span><span className="stat-label">Pageviews</span></div>
-        <div className="stat"><span className="stat-value">{stats ? fmt(stats.clicks) : '—'}</span><span className="stat-label">Clicks</span></div>
-        <div className="stat"><span className="stat-value">30d</span><span className="stat-label">Period</span></div>
+        <div className="stat"><span className="stat-value">{stats ? fmt(stats.sessions) : '—'}</span><span className="stat-label">Sessions</span></div>
+        <div className="stat"><span className="stat-value">{stats ? fmt(stats.conversions) : '—'}</span><span className="stat-label">Conversions</span></div>
+        <div className="stat"><span className="stat-value">{stats ? stats.conversionRate + '%' : '—'}</span><span className="stat-label">Conv rate</span></div>
       </div>
     </button>
   );
@@ -225,7 +225,7 @@ function CreatePartnerModal({ onClose, onCreated }) {
           <div className="field">
             <label className="field-label">Website domain</label>
             <input className="field-input mono" value={domain} onChange={e => setDomain(e.target.value)} placeholder="acme.com" required />
-            <span className="field-hint">Without https:// or www — subdomains are included automatically.</span>
+            <span className="field-hint">Without https:// or www — subdomains included automatically.</span>
           </div>
           <div className="modal-actions">
             <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
@@ -245,12 +245,7 @@ function PartnerDetail({ partner, onBack, onDeleted }) {
 
   useEffect(() => { getPartnerStats(partner.id).then(setStats); }, [partner.id]);
 
-  const snippet = generateSnippet({
-    clientId: partner.id,
-    domain: partner.domain,
-    secretKey: partner.secret_key,
-    ingestUrl: INGEST_URL,
-  });
+  const snippet = generateSnippet({ clientId: partner.id, ingestUrl: INGEST_URL });
 
   function copySnippet() {
     navigator.clipboard.writeText(snippet).then(() => {
@@ -281,9 +276,9 @@ function PartnerDetail({ partner, onBack, onDeleted }) {
 
       <div className="stats-strip">
         <div className="stat-box"><span className="stat-box-val">{stats ? fmt(stats.pageviews) : '—'}</span><span className="stat-box-label">Pageviews (30d)</span></div>
-        <div className="stat-box"><span className="stat-box-val">{stats ? fmt(stats.clicks) : '—'}</span><span className="stat-box-label">Clicks (30d)</span></div>
-        <div className="stat-box"><span className="stat-box-val mono">{partner.id}</span><span className="stat-box-label">Partner ID</span></div>
-        <div className="stat-box"><span className="stat-box-val mono">{partner.domain}</span><span className="stat-box-label">Domain lock</span></div>
+        <div className="stat-box"><span className="stat-box-val">{stats ? fmt(stats.sessions) : '—'}</span><span className="stat-box-label">Sessions (30d)</span></div>
+        <div className="stat-box"><span className="stat-box-val">{stats ? fmt(stats.conversions) : '—'}</span><span className="stat-box-label">Conversions (30d)</span></div>
+        <div className="stat-box"><span className="stat-box-val">{stats ? stats.conversionRate + '%' : '—'}</span><span className="stat-box-label">Conv rate (30d)</span></div>
       </div>
 
       <div className="tabs">

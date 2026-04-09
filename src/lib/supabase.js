@@ -50,19 +50,96 @@ export async function deletePartner(id) {
   return { error };
 }
 
+// ── Stats ─────────────────────────────────────────────────────────────────────
+// Pulls pageviews + clicks from events table, sessions from sessions table.
+// Using .select('type') with a filter is the lightest query — no COUNT() on
+// large tables, just fetches the type column for the date window.
+
 export async function getPartnerStats(clientId, days = 30) {
   const since = new Date(Date.now() - days * 86400000).toISOString();
 
-  const { data, error } = await supabase
-    .from('events')
-    .select('type')
-    .eq('client_id', clientId)
-    .gte('created_at', since);
+  // Run queries in parallel
+  const [eventsRes, sessionsRes, conversionsRes] = await Promise.all([
+    supabase
+      .from('events')
+      .select('type')
+      .eq('client_id', clientId)
+      .in('type', ['pageview', 'click'])
+      .gte('created_at', since),
 
-  if (error) return { pageviews: 0, clicks: 0 };
+    supabase
+      .from('sessions')
+      .select('session_id, converted')
+      .eq('client_id', clientId)
+      .gte('created_at', since),
+
+    supabase
+      .from('conversion_events')
+      .select('id')
+      .eq('client_id', clientId)
+      .gte('created_at', since),
+  ]);
+
+  const events      = eventsRes.data      || [];
+  const sessions    = sessionsRes.data    || [];
+  const conversions = conversionsRes.data || [];
+
+  const pageviews       = events.filter(e => e.type === 'pageview').length;
+  const clicks          = events.filter(e => e.type === 'click').length;
+  const sessionCount    = sessions.length;
+  const convertedCount  = sessions.filter(s => s.converted).length;
+  const conversionRate  = sessionCount > 0
+    ? ((convertedCount / sessionCount) * 100).toFixed(1)
+    : '0.0';
 
   return {
-    pageviews: data.filter(e => e.type === 'pageview').length,
-    clicks:    data.filter(e => e.type === 'click').length,
+    pageviews,
+    clicks,
+    sessions:       sessionCount,
+    conversions:    conversions.length,
+    conversionRate, // e.g. "4.2"
   };
+}
+
+// ── Conversion goals ──────────────────────────────────────────────────────────
+
+export async function getGoals(clientId) {
+  const { data, error } = await supabase
+    .from('conversion_goals')
+    .select('*')
+    .eq('client_id', clientId)
+    .order('created_at', { ascending: false });
+  return { data, error };
+}
+
+export async function createGoal({ clientId, name, type, urlPattern, cssSelector, matchType }) {
+  const { data, error } = await supabase
+    .from('conversion_goals')
+    .insert({
+      client_id:    clientId,
+      name,
+      type,
+      url_pattern:  urlPattern  || null,
+      css_selector: cssSelector || null,
+      match_type:   matchType   || 'exact',
+      active:       true,
+    })
+    .select()
+    .single();
+  return { data, error };
+}
+
+export async function toggleGoal(id, active) {
+  const { data, error } = await supabase
+    .from('conversion_goals')
+    .update({ active })
+    .eq('id', id)
+    .select()
+    .single();
+  return { data, error };
+}
+
+export async function deleteGoal(id) {
+  const { error } = await supabase.from('conversion_goals').delete().eq('id', id);
+  return { error };
 }
