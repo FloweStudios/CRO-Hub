@@ -249,6 +249,8 @@ export default async function handler(req, res) {
     );
   }
 
+  console.log('[ingest] validEvents:', validEvents.length, '| sessions:', sessionMap.size, '| conversions:', conversions.length);
+  
   // Fire all writes in parallel — client already has 202
   await Promise.all(writes);
 
