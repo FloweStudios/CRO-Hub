@@ -44,12 +44,15 @@ function Login() {
   return (
     <div className="login-root">
       <div className="login-left">
-        <div className="login-brand">
-          <span className="logotype">CRO<em>hub</em></span>
-          <p className="login-tagline">Conversion intelligence<br />for agencies that move fast.</p>
-        </div>
         <div className="login-grid-bg" aria-hidden="true">
           {Array.from({ length: 64 }).map((_, i) => <div key={i} className="grid-cell" />)}
+        </div>
+        <div className="login-brand">
+          <span className="logotype">CRO<em>hub</em></span>
+          <p className="login-tagline">
+            Conversion intelligence<br />
+            <span>for your partners.</span>
+          </p>
         </div>
       </div>
       <div className="login-right">
