@@ -3,7 +3,7 @@ import { supabase, signIn, signOut, onAuthChange, getPartners, createPartner, de
 import { generateSnippet } from './lib/snippet';
 import './App.css';
 
-const INGEST_URL = process.env.REACT_APP_INGEST_URL || 'https://your-project.vercel.app/api/ingest';
+const INGEST_URL = process.env.REACT_APP_INGEST_URL;
 
 export default function App() {
   const [session, setSession] = useState(null);
