@@ -62,7 +62,7 @@ var _dom='${esc(cleanDomain)}',_h=location.hostname.toLowerCase().replace(/^www\
 if(_h!==_dom&&!_h.endsWith('.'+_dom))return;
 var _cid='${esc(clientId)}',_sec='${esc(secretKey)}',_ing='${esc(ingestUrl)}';
 var _goals=${goalsJson};
-var _FLUSH=10000,_QK='__crq_${clientId.replace(/[^a-z0-9]/g,'_')}__',_MAX=150;
+var _FLUSH=1500,_QK='__crq_${clientId.replace(/[^a-z0-9]/g,'_')}__',_MAX=150;
 function _uuid(){if(crypto.randomUUID)return crypto.randomUUID();
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){
     var r=(Math.random()*16)|0;return(c==='x'?r:(r&0x3)|0x8).toString(16);});}
