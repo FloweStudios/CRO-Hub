@@ -433,30 +433,59 @@ function GoalsPage({ partner }) {
   );
 }
 
+// REPLACE the entire AddGoalModal function in App.js with this:
+
 function AddGoalModal({ clientId, onClose, onCreated }) {
   const [name, setName] = useState('');
   const [type, setType] = useState('click');
   const [selector, setSelector] = useState('');
   const [urlPattern, setUrlPattern] = useState('');
   const [matchType, setMatchType] = useState('exact');
+  // For click_url: the href pattern to match
+  const [clickUrlPattern, setClickUrlPattern] = useState('');
+  const [clickUrlMatch, setClickUrlMatch] = useState('contains');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   async function handleSubmit(e) {
     e.preventDefault(); setError('');
     if (!name.trim()) { setError('Name is required'); return; }
-    if ((type === 'click' || type === 'element_visible' || type === 'form_submit') && !selector.trim()) {
-      setError('CSS selector is required for this goal type'); return;
+
+    let cssSelector = null;
+    let finalUrlPattern = null;
+    let finalMatchType = matchType;
+
+    if (type === 'click') {
+      // Standard click — CSS selector required
+      if (!selector.trim()) { setError('CSS selector is required'); return; }
+      cssSelector = selector.trim();
+    } else if (type === 'click_url') {
+      // Click URL — match href attribute
+      if (!clickUrlPattern.trim()) { setError('URL pattern is required'); return; }
+      // We store click_url goals as type=click with a special selector that
+      // matches anchor tags whose href contains the pattern.
+      // The tracker evaluates el.href against this pattern client-side.
+      cssSelector = 'a';                   // match all anchor clicks
+      finalUrlPattern = clickUrlPattern.trim();
+      finalMatchType = clickUrlMatch;
+    } else if (type === 'element_visible' || type === 'form_submit') {
+      if (!selector.trim()) { setError('CSS selector is required'); return; }
+      cssSelector = selector.trim();
+    } else if (type === 'page_load') {
+      if (!urlPattern.trim()) { setError('URL pattern is required'); return; }
+      finalUrlPattern = urlPattern.trim();
+      finalMatchType = matchType;
     }
-    if (type === 'page_load' && !urlPattern.trim()) {
-      setError('URL pattern is required for page load goals'); return;
-    }
+
     setLoading(true);
     const { error } = await createGoal({
-      clientId, name: name.trim(), type,
-      cssSelector: selector.trim() || null,
-      urlPattern:  urlPattern.trim() || null,
-      matchType,
+      clientId,
+      name: name.trim(),
+      // Store click_url as its own type so the tracker knows to check href
+      type: type === 'click_url' ? 'click_url' : type,
+      cssSelector,
+      urlPattern:  finalUrlPattern,
+      matchType:   finalMatchType,
     });
     if (error) { setError(error.message); setLoading(false); return; }
     onCreated();
@@ -465,29 +494,69 @@ function AddGoalModal({ clientId, onClose, onCreated }) {
   return (
     <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal modal-lg">
-        <div className="modal-header"><h3>Add conversion goal</h3><button className="modal-close" onClick={onClose}>✕</button></div>
+        <div className="modal-header">
+          <h3>Add conversion goal</h3>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
         <form onSubmit={handleSubmit}>
           {error && <div className="login-error">{error}</div>}
+
           <div className="field">
             <label className="field-label">Goal name</label>
-            <input className="field-input" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Demo request, Purchase, Sign up" required autoFocus />
+            <input className="field-input" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Phone click, Demo request, Purchase" required autoFocus />
           </div>
+
           <div className="field">
             <label className="field-label">Goal type</label>
             <select className="field-input" value={type} onChange={e => setType(e.target.value)}>
-              <option value="click">Click — user clicks an element</option>
+              <option value="click">Click — user clicks an element (CSS selector)</option>
+              <option value="click_url">Click URL — user clicks a link whose URL contains a pattern</option>
               <option value="element_visible">Element visible — element scrolls into view</option>
               <option value="page_load">Page load — user lands on a URL</option>
               <option value="form_submit">Form submit — user submits a form</option>
             </select>
           </div>
-          {(type === 'click' || type === 'element_visible' || type === 'form_submit') && (
+
+          {type === 'click' && (
             <div className="field">
               <label className="field-label">CSS selector</label>
-              <input className="field-input mono" value={selector} onChange={e => setSelector(e.target.value)} placeholder="#cta-button, .buy-now, form.checkout" />
+              <input className="field-input mono" value={selector} onChange={e => setSelector(e.target.value)} placeholder="#cta-button, .buy-now, button[type=submit]" />
               <span className="field-hint">Any valid CSS selector — ID, class, attribute, or tag.</span>
             </div>
           )}
+
+          {type === 'click_url' && (
+            <>
+              <div className="goal-hint-box">
+                Use this to track clicks on phone numbers, email addresses, or any link by its URL. Works exactly like Google Tag Manager's "Click URL" trigger.
+              </div>
+              <div className="field">
+                <label className="field-label">URL match type</label>
+                <select className="field-input" value={clickUrlMatch} onChange={e => setClickUrlMatch(e.target.value)}>
+                  <option value="contains">Contains</option>
+                  <option value="exact">Equals</option>
+                  <option value="starts_with">Starts with</option>
+                  <option value="regex">Matches regex</option>
+                </select>
+              </div>
+              <div className="field">
+                <label className="field-label">URL pattern</label>
+                <input className="field-input mono" value={clickUrlPattern} onChange={e => setClickUrlPattern(e.target.value)} placeholder="tel:, mailto:, /checkout" />
+                <span className="field-hint">
+                  Examples: <code>tel:</code> for all phone clicks · <code>mailto:</code> for all email clicks · <code>/checkout</code> for checkout links
+                </span>
+              </div>
+            </>
+          )}
+
+          {(type === 'element_visible' || type === 'form_submit') && (
+            <div className="field">
+              <label className="field-label">CSS selector</label>
+              <input className="field-input mono" value={selector} onChange={e => setSelector(e.target.value)} placeholder={type === 'form_submit' ? 'form, form#contact' : '#pricing-section, .cta-banner'} />
+              <span className="field-hint">Any valid CSS selector.</span>
+            </div>
+          )}
+
           {type === 'page_load' && (
             <>
               <div className="field">
@@ -505,15 +574,19 @@ function AddGoalModal({ clientId, onClose, onCreated }) {
               </div>
             </>
           )}
+
           <div className="modal-actions">
             <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn-primary" disabled={loading}>{loading ? <span className="spinner" /> : 'Save goal'}</button>
+            <button type="submit" className="btn-primary" disabled={loading}>
+              {loading ? <span className="spinner" /> : 'Save goal'}
+            </button>
           </div>
         </form>
       </div>
     </div>
   );
 }
+
 
 // ─── Top pages ────────────────────────────────────────────────────────────────
 
