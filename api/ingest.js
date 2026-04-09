@@ -22,17 +22,12 @@ const VALID_TYPES = new Set([
 const VALID_DEVICES = new Set(['mobile', 'tablet', 'desktop']);
 const MAX_BATCH = 100;
 
-const origin = req.headers.origin || '*';
-
-const CORS = {
-  'Access-Control-Allow-Origin':      origin,
-  'Access-Control-Allow-Methods':     'POST, OPTIONS',
-  'Access-Control-Allow-Headers':     'Content-Type, X-CRO-Secret',
-  'Access-Control-Allow-Credentials': 'true',
-};
-
 export default async function handler(req, res) {
-  Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v));
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-CRO-Secret');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
 
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST')   return res.status(405).send('Method not allowed');
