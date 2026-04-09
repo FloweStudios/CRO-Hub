@@ -3,5 +3,5 @@
 
 export function generateSnippet({ clientId, ingestUrl }) {
   const base = ingestUrl.replace(/\/api\/ingest$/, '');
-  return `<script src="${base}/api/track/${clientId}.js" defer></script>`;
+  return `<script src="${base}/api/${clientId}.js" defer></script>`;
 }
