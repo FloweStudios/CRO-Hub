@@ -202,7 +202,7 @@ function _checkGoals(triggerType,el){
     if(match){_firedGoals[g.id]=true;
       _enq(Object.assign(_base('conversion'),{goal_id:g.id}));}});}
 function _urlMatch(url,pattern,matchType){
-  try{var u=url.replace(/^https?:\/\/[^/]+/,'');
+  try{var u=url.split('/').slice(3).join('/');u=u?'/'+u:'/';
     if(matchType==='exact')return u===pattern;
     if(matchType==='contains')return u.indexOf(pattern)>-1;
     if(matchType==='starts_with')return u.startsWith(pattern);
