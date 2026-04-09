@@ -298,7 +298,6 @@ code { font-family: var(--mono); font-size: 0.88em; }
 .settings-warn { font-size: 0.88rem; color: var(--text2); margin-bottom: 16px; line-height: 1.5; }
 .confirm-row { display: flex; align-items: center; gap: 12px; font-size: 0.9rem; color: var(--text2); }
 
-/* â”€â”€ Misc helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .mono-sm { font-family: var(--mono); font-size: 0.78rem; color: var(--text2); }
 
 .goal-hint-box {
@@ -312,3 +311,70 @@ code { font-family: var(--mono); font-size: 0.88em; }
   line-height: 1.5;
   margin-bottom: 20px;
 }
+
+/* Forms page layout */
+.forms-page { display: flex; flex-direction: column; gap: 20px; }
+.forms-layout { display: grid; grid-template-columns: 220px 1fr; gap: 20px; align-items: start; }
+.forms-sidebar { display: flex; flex-direction: column; gap: 6px; }
+.form-list-item { background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; cursor: pointer; transition: border-color 0.12s; position: relative; }
+.form-list-item:hover { border-color: var(--border-md); }
+.form-list-item.active { border-color: var(--accent); background: var(--bg2); }
+.form-list-name { font-size: 0.88rem; font-weight: 500; margin-bottom: 3px; }
+.form-list-selector { color: var(--text3); }
+.form-list-delete { position: absolute; top: 10px; right: 10px; color: var(--text3); font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; opacity: 0; transition: opacity 0.12s, color 0.12s; }
+.form-list-item:hover .form-list-delete { opacity: 1; }
+.form-list-delete:hover { color: var(--red); }
+.forms-detail { min-width: 0; }
+.forms-pick { display: flex; align-items: center; justify-content: center; padding: 60px; color: var(--text3); font-size: 0.88rem; background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+
+/* Form detail header */
+.form-detail { display: flex; flex-direction: column; gap: 20px; }
+.form-detail-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.form-detail-name { font-size: 1rem; font-weight: 500; }
+.version-selector { display: flex; align-items: center; gap: 8px; }
+.version-label { font-size: 0.78rem; color: var(--text3); text-transform: uppercase; letter-spacing: 0.04em; }
+.version-select { background: var(--bg2); border: 1px solid var(--border-md); border-radius: var(--radius); padding: 6px 10px; color: var(--text); font-size: 0.82rem; font-family: var(--mono); outline: none; cursor: pointer; }
+.version-select:focus { border-color: var(--accent); }
+.version-archive-notice { background: var(--amber-dim); border: 1px solid var(--amber); color: var(--amber); border-radius: var(--radius); padding: 8px 14px; font-size: 0.82rem; }
+
+/* Funnel summary strip */
+.funnel-summary { display: flex; gap: 0; background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+.funnel-stat { flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid var(--border); }
+.funnel-stat:last-child { border-right: none; }
+.funnel-stat-val { font-size: 1.4rem; font-weight: 500; letter-spacing: -0.02em; }
+.funnel-stat-val.green { color: var(--green); }
+.funnel-stat-val.red { color: var(--red); }
+.funnel-stat-label { font-size: 0.72rem; color: var(--text3); text-transform: uppercase; letter-spacing: 0.04em; }
+
+/* Funnel steps */
+.funnel-steps { display: flex; flex-direction: column; gap: 0; background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+.funnel-step { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.funnel-step:last-child { border-bottom: none; }
+.step-entry { background: var(--bg2); }
+.step-exit { background: var(--green-dim); }
+.funnel-step-label { width: 160px; flex-shrink: 0; }
+.funnel-field-name { display: block; font-size: 0.88rem; font-weight: 500; }
+.funnel-field-type { font-size: 0.72rem; color: var(--text3); font-family: var(--mono); }
+.funnel-step-bar-wrap { flex: 1; height: 24px; background: var(--bg3); border-radius: 4px; overflow: hidden; }
+.funnel-step-bar { height: 100%; border-radius: 4px; opacity: 0.75; transition: width 0.4s ease; min-width: 2px; }
+.funnel-step-meta { display: flex; align-items: center; gap: 10px; width: 140px; flex-shrink: 0; justify-content: flex-end; }
+.funnel-step-count { font-family: var(--mono); font-size: 0.88rem; font-weight: 500; }
+.funnel-step-pct { font-size: 0.78rem; color: var(--text2); font-family: var(--mono); width: 44px; text-align: right; }
+.funnel-step-time { font-size: 0.72rem; color: var(--text3); font-family: var(--mono); }
+
+/* Gap between funnel steps */
+.funnel-gap { display: flex; align-items: center; gap: 10px; padding: 4px 16px; }
+.funnel-gap-line { flex: 1; height: 1px; background: var(--border); }
+.funnel-gap-info { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.funnel-drop { font-size: 0.75rem; color: var(--red); font-weight: 500; }
+.funnel-time { font-size: 0.75rem; color: var(--text3); font-family: var(--mono); }
+
+/* Version field list */
+.version-fields { background: var(--bg1); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+.version-fields-title { font-size: 0.72rem; font-weight: 500; color: var(--text3); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 10px; }
+.version-fields-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.version-field-tag { background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px; font-size: 0.78rem; color: var(--text2); }
+.field-type-dim { color: var(--text3); margin-left: 4px; }
+
+/* Misc */
+.field-optional { font-weight: 400; color: var(--text3); text-transform: none; letter-spacing: 0; }

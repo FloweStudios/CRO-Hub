@@ -13,7 +13,6 @@ const VALID_DEVICES = new Set(['mobile', 'tablet', 'desktop']);
 const MAX_BATCH = 100;
 
 export default async function handler(req, res) {
-  // ── CORS ────────────────────────────────────────────────────────────────────
   const origin = req.headers.origin || '*';
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -23,7 +22,6 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).send('Method not allowed');
 
-  // ── Parse body ──────────────────────────────────────────────────────────────
   let body = req.body;
   if (typeof body === 'string') {
     try { body = JSON.parse(body); } catch { return res.status(400).send('Invalid JSON'); }
@@ -38,7 +36,6 @@ export default async function handler(req, res) {
   if (events.length > MAX_BATCH)
     return res.status(400).send('Batch too large');
 
-  // ── Auth ────────────────────────────────────────────────────────────────────
   const incomingSecret = req.headers['x-cro-secret'] || '';
 
   const { data: clientRow, error: clientErr } = await supabase
@@ -47,9 +44,8 @@ export default async function handler(req, res) {
     .eq('id', client_id)
     .single();
 
-  if (clientErr || !clientRow || clientRow.secret_key !== incomingSecret) {
+  if (clientErr || !clientRow || clientRow.secret_key !== incomingSecret)
     return res.status(202).send('accepted');
-  }
 
   // ── Geo lookup ──────────────────────────────────────────────────────────────
   let geo = null;
@@ -57,8 +53,7 @@ export default async function handler(req, res) {
 
   if (hasPageview) {
     const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
-      || req.headers['x-real-ip']
-      || '';
+      || req.headers['x-real-ip'] || '';
 
     if (ip && ip !== '127.0.0.1' && ip !== '::1') {
       try {
@@ -67,18 +62,20 @@ export default async function handler(req, res) {
           { signal: AbortSignal.timeout(2000) }
         );
         const geoJson = await geoRes.json();
-        if (geoJson.status === 'success') {
-          geo = { country: geoJson.country, city: geoJson.city };
-        }
-      } catch {
-        // geo is best-effort, never block ingestion
-      }
+        if (geoJson.status === 'success') geo = { country: geoJson.country, city: geoJson.city };
+      } catch {}
     }
   }
 
+  // ── Form version resolution ─────────────────────────────────────────────────
+  // Group form_field events by form_id, compute fingerprint, resolve/create version.
+  // Returns a map of form_id → form_version_id.
+
+  const formVersionMap = await resolveFormVersions(client_id, events);
+
   // ── Categorise events ───────────────────────────────────────────────────────
   const validEvents  = [];
-  const sessionsSeen = new Map(); // session_id → session object
+  const sessionsSeen = new Map();
   const conversions  = [];
 
   for (let i = 0; i < events.length; i++) {
@@ -88,7 +85,6 @@ export default async function handler(req, res) {
     if (!ev.session_id || !ev.url || !ev.ts) continue;
     if (ev.device_type && !VALID_DEVICES.has(ev.device_type)) continue;
 
-    // ── Build session row (upserted once per session_id) ──────────────────
     if (!sessionsSeen.has(ev.session_id)) {
       sessionsSeen.set(ev.session_id, {
         session_id:    String(ev.session_id).slice(0, 36),
@@ -111,7 +107,6 @@ export default async function handler(req, res) {
       });
     }
 
-    // ── Conversion events go to their own table ───────────────────────────
     if (ev.type === 'conversion') {
       conversions.push({
         client_id,
@@ -125,10 +120,9 @@ export default async function handler(req, res) {
         utm_medium:   ev.utm_medium   || null,
         utm_campaign: ev.utm_campaign || null,
       });
-      continue; // don't add to events table
+      continue;
     }
 
-    // ── Build event row ───────────────────────────────────────────────────
     const row = {
       event_id:      String(ev.event_id).slice(0, 36),
       client_id,
@@ -185,6 +179,10 @@ export default async function handler(req, res) {
       row.time_to_fill_ms = intOrNull(ev.time_to_fill_ms);
       row.field_index     = intOrNull(ev.field_index);
       row.xpath           = ev.xpath      ? String(ev.xpath).slice(0, 1024)     : null;
+
+      // Tag with resolved form version
+      const versionId = formVersionMap.get(ev.form_id);
+      if (versionId) row.form_version_id = versionId;
     }
 
     validEvents.push(row);
@@ -195,50 +193,136 @@ export default async function handler(req, res) {
 
   if (validEvents.length > 0) {
     writes.push(
-      supabase.from('events')
-        .insert(validEvents)
-        .then(({ error }) => {
-          if (error) console.error('[ingest] events error:', error.message);
-        })
+      supabase.from('events').insert(validEvents)
+        .then(({ error }) => { if (error) console.error('[ingest] events error:', error.message); })
     );
   }
 
   if (sessionsSeen.size > 0) {
     writes.push(
-      supabase.from('sessions')
-        .upsert(Array.from(sessionsSeen.values()), {
-          onConflict: 'session_id',
-          ignoreDuplicates: false,
-        })
-        .then(({ error }) => {
-          if (error) console.error('[ingest] sessions error:', error.message);
-        })
+      supabase.from('sessions').upsert(Array.from(sessionsSeen.values()), {
+        onConflict: 'session_id', ignoreDuplicates: false,
+      }).then(({ error }) => { if (error) console.error('[ingest] sessions error:', error.message); })
     );
   }
 
   if (conversions.length > 0) {
     writes.push(
-      supabase.from('conversion_events')
-        .insert(conversions)
-        .then(({ error }) => {
-          if (error) console.error('[ingest] conversions error:', error.message);
-        })
+      supabase.from('conversion_events').insert(conversions)
+        .then(({ error }) => { if (error) console.error('[ingest] conversions error:', error.message); })
     );
-
     const convertedIds = [...new Set(conversions.map(c => c.session_id))];
     writes.push(
-      supabase.from('sessions')
-        .update({ converted: true })
-        .in('session_id', convertedIds)
-        .then(({ error }) => {
-          if (error) console.error('[ingest] session convert error:', error.message);
-        })
+      supabase.from('sessions').update({ converted: true }).in('session_id', convertedIds)
+        .then(({ error }) => { if (error) console.error('[ingest] session convert error:', error.message); })
     );
   }
 
   await Promise.all(writes);
-
   return res.status(202).send('accepted');
+}
+
+// ── Form version resolution ───────────────────────────────────────────────────
+// For each unique form_id in this batch, compute a fingerprint from the
+// field names seen. Look up the current version — if fingerprint changed,
+// create a new version and mark old one as not current.
+
+async function resolveFormVersions(clientId, events) {
+  const versionMap = new Map(); // form_id → version_uuid
+
+  // Gather fields per form_id from this batch
+  const formsInBatch = new Map(); // form_id → [{name, type, index}]
+
+  events.forEach(ev => {
+    if (ev.type !== 'form_field' || !ev.form_id) return;
+    if (!formsInBatch.has(ev.form_id)) formsInBatch.set(ev.form_id, new Map());
+    const fields = formsInBatch.get(ev.form_id);
+    // Key by index or name — use lowest index seen per field name
+    const key = ev.field_name || String(ev.field_index);
+    if (!fields.has(key)) {
+      fields.set(key, {
+        name:  ev.field_name  || null,
+        type:  ev.field_type  || null,
+        index: intOrNull(ev.field_index),
+      });
+    }
+  });
+
+  if (formsInBatch.size === 0) return versionMap;
+
+  // Look up form definitions for these form_ids
+  const formIds = [...formsInBatch.keys()];
+  const { data: definitions } = await supabase
+    .from('form_definitions')
+    .select('id, selector')
+    .eq('client_id', clientId)
+    .in('selector', formIds);
+
+  // Also try matching by form_id directly (id attribute)
+  const defMap = new Map(); // selector/id → definition.id
+  (definitions || []).forEach(d => defMap.set(d.selector, d.id));
+
+  for (const [formId, fieldsMap] of formsInBatch) {
+    const definitionId = defMap.get(formId) || defMap.get('#' + formId);
+    if (!definitionId) continue; // form not registered — skip versioning
+
+    // Sort fields by index, build ordered array
+    const orderedFields = Array.from(fieldsMap.values())
+      .sort((a, b) => (a.index ?? 999) - (b.index ?? 999));
+
+    const fingerprint = simpleHash(orderedFields.map(f => f.name || '').join('|'));
+
+    // Look up current version for this definition
+    const { data: currentVersion } = await supabase
+      .from('form_versions')
+      .select('id, fingerprint, version_number')
+      .eq('form_id', definitionId)
+      .eq('is_current', true)
+      .single();
+
+    if (currentVersion && currentVersion.fingerprint === fingerprint) {
+      // Same version — just update last_seen
+      versionMap.set(formId, currentVersion.id);
+      supabase.from('form_versions')
+        .update({ last_seen: new Date().toISOString() })
+        .eq('id', currentVersion.id)
+        .then(() => {});
+    } else {
+      // New version detected — mark old as not current
+      if (currentVersion) {
+        await supabase.from('form_versions')
+          .update({ is_current: false })
+          .eq('id', currentVersion.id);
+      }
+
+      const nextNumber = currentVersion ? currentVersion.version_number + 1 : 1;
+
+      const { data: newVersion } = await supabase
+        .from('form_versions')
+        .insert({
+          form_id:        definitionId,
+          client_id:      clientId,
+          version_number: nextNumber,
+          fingerprint,
+          fields:         orderedFields,
+          is_current:     true,
+        })
+        .select('id')
+        .single();
+
+      if (newVersion) versionMap.set(formId, newVersion.id);
+    }
+  }
+
+  return versionMap;
+}
+
+function simpleHash(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = Math.imul(31, h) + str.charCodeAt(i) | 0;
+  }
+  return Math.abs(h).toString(36).slice(0, 8);
 }
 
 function intOrNull(v) {

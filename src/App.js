@@ -3,6 +3,7 @@ import { supabase, signIn, signOut, onAuthChange, getPartners, createPartner, de
 import { generateSnippet } from './lib/snippet';
 import { getOverview, getDailySeries, getTopPages, getSources, getConversionPaths, getFormAnalytics, getVisitorLatency } from './lib/analytics';
 import './App.css';
+import FormsPage from './pages/FormsPage';
 
 const INGEST_URL = process.env.REACT_APP_INGEST_URL;
 
@@ -725,54 +726,6 @@ function PathsPage({ partner, days }) {
             ))}
           </div>
         )}
-    </div>
-  );
-}
-
-// ─── Form analytics ───────────────────────────────────────────────────────────
-
-function FormsPage({ partner, days }) {
-  const [forms, setForms] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    getFormAnalytics(partner.id, days).then(data => { setForms(data); setLoading(false); });
-  }, [partner.id, days]);
-
-  return (
-    <div>
-      <div className="section-header">
-        <div><h3 className="section-title">Form analytics</h3><p className="section-sub">Field-level drop-off and hesitation time</p></div>
-      </div>
-      {loading ? <div className="loading-state"><div className="spinner lg" /></div>
-        : forms.length === 0 ? <div className="empty-state"><div className="empty-icon">◈</div><h3>No form data yet</h3><p>The tracker automatically captures form interactions once the snippet is installed.</p></div>
-        : forms.map((form, i) => (
-          <div key={i} className="form-card">
-            <div className="form-card-header">
-              <span className="mono-sm">{form.url.replace(/^https?:\/\/[^/]+/, '') || '/'}</span>
-              <span className="form-id mono-sm">{form.formId}</span>
-              <div className="form-stats">
-                <span>{form.starts} started</span>
-                <span>{form.submits} submitted</span>
-                <span className="conv-rate-pill">{form.completionRate}% completion</span>
-              </div>
-            </div>
-            <div className="field-rows">
-              <div className="field-row-head">
-                <span>Field</span><span>Type</span><span>Interactions</span><span>Avg time</span>
-              </div>
-              {form.fields.map((field, j) => (
-                <div key={j} className="field-row">
-                  <span className="mono-sm">{field.name}</span>
-                  <span className="field-type-tag">{field.type}</span>
-                  <span>{field.interactions}</span>
-                  <span>{field.avgTime != null ? fmtTime(field.avgTime) : '—'}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
     </div>
   );
 }
