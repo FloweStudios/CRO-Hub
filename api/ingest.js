@@ -54,7 +54,6 @@ export default async function handler(req, res) {
   if (hasPageview) {
     const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
       || req.headers['x-real-ip'] || '';
-
     if (ip && ip !== '127.0.0.1' && ip !== '::1') {
       try {
         const geoRes = await fetch(
@@ -68,9 +67,6 @@ export default async function handler(req, res) {
   }
 
   // ── Form version resolution ─────────────────────────────────────────────────
-  // Group form_field events by form_id, compute fingerprint, resolve/create version.
-  // Returns a map of form_id → form_version_id.
-
   const formVersionMap = await resolveFormVersions(client_id, events);
 
   // ── Categorise events ───────────────────────────────────────────────────────
@@ -180,7 +176,6 @@ export default async function handler(req, res) {
       row.field_index     = intOrNull(ev.field_index);
       row.xpath           = ev.xpath      ? String(ev.xpath).slice(0, 1024)     : null;
 
-      // Tag with resolved form version
       const versionId = formVersionMap.get(ev.form_id);
       if (versionId) row.form_version_id = versionId;
     }
@@ -188,13 +183,13 @@ export default async function handler(req, res) {
     validEvents.push(row);
   }
 
-  // ── Write everything in parallel ────────────────────────────────────────────
+  // ── Write ───────────────────────────────────────────────────────────────────
   const writes = [];
 
   if (validEvents.length > 0) {
     writes.push(
       supabase.from('events').insert(validEvents)
-        .then(({ error }) => { if (error) console.error('[ingest] events error:', error.message); })
+        .then(({ error }) => { if (error) console.error('[ingest] events:', error.message); })
     );
   }
 
@@ -202,19 +197,19 @@ export default async function handler(req, res) {
     writes.push(
       supabase.from('sessions').upsert(Array.from(sessionsSeen.values()), {
         onConflict: 'session_id', ignoreDuplicates: false,
-      }).then(({ error }) => { if (error) console.error('[ingest] sessions error:', error.message); })
+      }).then(({ error }) => { if (error) console.error('[ingest] sessions:', error.message); })
     );
   }
 
   if (conversions.length > 0) {
     writes.push(
       supabase.from('conversion_events').insert(conversions)
-        .then(({ error }) => { if (error) console.error('[ingest] conversions error:', error.message); })
+        .then(({ error }) => { if (error) console.error('[ingest] conversions:', error.message); })
     );
     const convertedIds = [...new Set(conversions.map(c => c.session_id))];
     writes.push(
       supabase.from('sessions').update({ converted: true }).in('session_id', convertedIds)
-        .then(({ error }) => { if (error) console.error('[ingest] session convert error:', error.message); })
+        .then(({ error }) => { if (error) console.error('[ingest] session convert:', error.message); })
     );
   }
 
@@ -223,23 +218,23 @@ export default async function handler(req, res) {
 }
 
 // ── Form version resolution ───────────────────────────────────────────────────
-// For each unique form_id in this batch, compute a fingerprint from the
-// field names seen. Look up the current version — if fingerprint changed,
-// create a new version and mark old one as not current.
+// Matches ev.form_id (the raw id/name attribute from the DOM) against
+// form_definitions.selector — tries multiple formats:
+//   ev.form_id = "contact-form"
+//   selector could be: "#contact-form", "contact-form", "[name=contact-form]"
 
 async function resolveFormVersions(clientId, events) {
-  const versionMap = new Map(); // form_id → version_uuid
+  const versionMap = new Map();
 
-  // Gather fields per form_id from this batch
-  const formsInBatch = new Map(); // form_id → [{name, type, index}]
+  // Collect unique form_ids from form events in this batch
+  const formIdsInBatch = new Map(); // form_id → Map of field key → field obj
 
   events.forEach(ev => {
     if (ev.type !== 'form_field' || !ev.form_id) return;
-    if (!formsInBatch.has(ev.form_id)) formsInBatch.set(ev.form_id, new Map());
-    const fields = formsInBatch.get(ev.form_id);
-    // Key by index or name — use lowest index seen per field name
-    const key = ev.field_name || String(ev.field_index);
-    if (!fields.has(key)) {
+    if (!formIdsInBatch.has(ev.form_id)) formIdsInBatch.set(ev.form_id, new Map());
+    const fields = formIdsInBatch.get(ev.form_id);
+    const key = ev.field_name || String(ev.field_index || '');
+    if (key && !fields.has(key)) {
       fields.set(key, {
         name:  ev.field_name  || null,
         type:  ev.field_type  || null,
@@ -248,47 +243,65 @@ async function resolveFormVersions(clientId, events) {
     }
   });
 
-  if (formsInBatch.size === 0) return versionMap;
+  if (formIdsInBatch.size === 0) return versionMap;
 
-  // Look up form definitions for these form_ids
-  const formIds = [...formsInBatch.keys()];
+  // Fetch ALL form definitions for this client in one query
   const { data: definitions } = await supabase
     .from('form_definitions')
     .select('id, selector')
-    .eq('client_id', clientId)
-    .in('selector', formIds);
+    .eq('client_id', clientId);
 
-  // Also try matching by form_id directly (id attribute)
-  const defMap = new Map(); // selector/id → definition.id
-  (definitions || []).forEach(d => defMap.set(d.selector, d.id));
+  if (!definitions || definitions.length === 0) return versionMap;
 
-  for (const [formId, fieldsMap] of formsInBatch) {
-    const definitionId = defMap.get(formId) || defMap.get('#' + formId);
-    if (!definitionId) continue; // form not registered — skip versioning
+  // Build a lookup that normalises selectors for matching
+  // e.g. "#contact-form" → "contact-form", "form#booking" → "booking"
+  function normalise(sel) {
+    if (!sel) return '';
+    return sel
+      .replace(/^#/, '')           // strip leading #
+      .replace(/^form#/, '')       // strip form#
+      .replace(/^form\./, '')      // strip form.
+      .replace(/^\[id=['"]?/, '')  // strip [id="
+      .replace(/^\[name=['"]?/, '')// strip [name="
+      .replace(/['"\]]/g, '')      // strip closing quotes/bracket
+      .toLowerCase()
+      .trim();
+  }
 
-    // Sort fields by index, build ordered array
+  const defMap = new Map(); // normalised selector → definition id
+  definitions.forEach(d => {
+    defMap.set(normalise(d.selector), d.id);
+    defMap.set(d.selector, d.id); // also try exact match
+  });
+
+  for (const [formId, fieldsMap] of formIdsInBatch) {
+    // Try to find a matching definition
+    const definitionId =
+      defMap.get(formId) ||           // exact match: "contact-form"
+      defMap.get('#' + formId) ||     // try with #: "#contact-form"
+      defMap.get(normalise(formId));  // normalised match
+
+    if (!definitionId) continue;
+
     const orderedFields = Array.from(fieldsMap.values())
       .sort((a, b) => (a.index ?? 999) - (b.index ?? 999));
 
     const fingerprint = simpleHash(orderedFields.map(f => f.name || '').join('|'));
 
-    // Look up current version for this definition
     const { data: currentVersion } = await supabase
       .from('form_versions')
       .select('id, fingerprint, version_number')
       .eq('form_id', definitionId)
       .eq('is_current', true)
-      .single();
+      .maybeSingle();
 
     if (currentVersion && currentVersion.fingerprint === fingerprint) {
-      // Same version — just update last_seen
       versionMap.set(formId, currentVersion.id);
       supabase.from('form_versions')
         .update({ last_seen: new Date().toISOString() })
         .eq('id', currentVersion.id)
         .then(() => {});
     } else {
-      // New version detected — mark old as not current
       if (currentVersion) {
         await supabase.from('form_versions')
           .update({ is_current: false })

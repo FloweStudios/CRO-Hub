@@ -4,6 +4,7 @@ import { generateSnippet } from './lib/snippet';
 import { getOverview, getDailySeries, getTopPages, getSources, getConversionPaths, getFormAnalytics, getVisitorLatency } from './lib/analytics';
 import './App.css';
 import FormsPage from './pages/FormsPage';
+import { getConversionEvents, deleteConversionEvent } from './lib/supabase';
 
 const INGEST_URL = process.env.REACT_APP_INGEST_URL;
 
@@ -364,10 +365,13 @@ function OverviewPage({ partner, days }) {
 
 // ─── Goals page ───────────────────────────────────────────────────────────────
 
-function GoalsPage({ partner }) {
-  const [goals, setGoals] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showAdd, setShowAdd] = useState(false);
+function GoalsPage({ partner, days }) {
+  const [goals, setGoals]       = useState([]);
+  const [events, setEvents]     = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [showAdd, setShowAdd]   = useState(false);
+  const [tab, setTab]           = useState('goals'); // 'goals' | 'events'
 
   const loadGoals = useCallback(async () => {
     setLoading(true);
@@ -376,19 +380,36 @@ function GoalsPage({ partner }) {
     setLoading(false);
   }, [partner.id]);
 
+  const loadEvents = useCallback(async () => {
+    setEventsLoading(true);
+    const { data } = await getConversionEvents(partner.id, days);
+    setEvents(data || []);
+    setEventsLoading(false);
+  }, [partner.id, days]);
+
   useEffect(() => { loadGoals(); }, [loadGoals]);
+  useEffect(() => { if (tab === 'events') loadEvents(); }, [tab, loadEvents]);
 
   async function handleToggle(id, active) {
     await toggleGoal(id, active);
     loadGoals();
   }
 
-  async function handleDelete(id) {
+  async function handleDeleteGoal(id) {
     await deleteGoal(id);
     loadGoals();
   }
 
-  const typeLabels = { click: 'Click', element_visible: 'Element visible', page_load: 'Page load', form_submit: 'Form submit' };
+  async function handleDeleteEvent(id) {
+    await deleteConversionEvent(id);
+    setEvents(prev => prev.filter(e => e.id !== id));
+  }
+
+  const typeLabels = {
+    click: 'Click', click_url: 'Click URL',
+    element_visible: 'Element visible',
+    page_load: 'Page load', form_submit: 'Form submit',
+  };
 
   return (
     <div className="goals-content">
@@ -397,12 +418,26 @@ function GoalsPage({ partner }) {
           <h3 className="section-title">Conversion goals</h3>
           <p className="section-sub">Define what counts as a conversion on {partner.domain}</p>
         </div>
-        <button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add goal</button>
+        {tab === 'goals' && (
+          <button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add goal</button>
+        )}
       </div>
 
-      {showAdd && <AddGoalModal clientId={partner.id} onClose={() => setShowAdd(false)} onCreated={() => { setShowAdd(false); loadGoals(); }} />}
+      <div className="tabs" style={{ marginBottom: 20 }}>
+        <button className={`tab ${tab === 'goals' ? 'active' : ''}`} onClick={() => setTab('goals')}>Goals</button>
+        <button className={`tab ${tab === 'events' ? 'active' : ''}`} onClick={() => setTab('events')}>Conversion events</button>
+      </div>
 
-      {loading ? <div className="loading-state"><div className="spinner lg" /></div>
+      {showAdd && (
+        <AddGoalModal
+          clientId={partner.id}
+          onClose={() => setShowAdd(false)}
+          onCreated={() => { setShowAdd(false); loadGoals(); }}
+        />
+      )}
+
+      {tab === 'goals' && (
+        loading ? <div className="loading-state"><div className="spinner lg" /></div>
         : goals.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">◎</div>
@@ -415,21 +450,69 @@ function GoalsPage({ partner }) {
               <div key={goal.id} className={`goal-row ${!goal.active ? 'inactive' : ''}`}>
                 <div className="goal-info">
                   <span className="goal-name">{goal.name}</span>
-                  <span className={`goal-type-pill type-${goal.type}`}>{typeLabels[goal.type]}</span>
+                  <span className={`goal-type-pill type-${goal.type}`}>{typeLabels[goal.type] || goal.type}</span>
                   <span className="goal-detail mono-sm">
                     {goal.css_selector || goal.url_pattern || '—'}
                   </span>
                 </div>
                 <div className="goal-actions">
-                  <button className={`toggle-btn ${goal.active ? 'on' : 'off'}`} onClick={() => handleToggle(goal.id, !goal.active)}>
+                  <button
+                    className={`toggle-btn ${goal.active ? 'on' : 'off'}`}
+                    onClick={() => handleToggle(goal.id, !goal.active)}
+                  >
                     {goal.active ? 'Active' : 'Paused'}
                   </button>
-                  <button className="btn-icon-danger" onClick={() => handleDelete(goal.id)}>✕</button>
+                  <button className="btn-icon-danger" onClick={() => handleDeleteGoal(goal.id)}>✕</button>
                 </div>
               </div>
             ))}
           </div>
-        )}
+        )
+      )}
+
+      {tab === 'events' && (
+        eventsLoading ? <div className="loading-state"><div className="spinner lg" /></div>
+        : events.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">◎</div>
+            <h3>No conversion events yet</h3>
+            <p>Conversion events will appear here once goals are triggered.</p>
+          </div>
+        ) : (
+          <div className="data-table">
+            <div className="table-head" style={{ gridTemplateColumns: '1fr 140px 90px 90px 80px 36px' }}>
+              <span>Page</span>
+              <span>Goal</span>
+              <span>Device</span>
+              <span>Source</span>
+              <span>Time</span>
+              <span></span>
+            </div>
+            {events.map(ev => (
+              <div key={ev.id} className="table-row" style={{ gridTemplateColumns: '1fr 140px 90px 90px 80px 36px' }}>
+                <span className="col-url mono-sm">{ev.url.replace(/^https?:\/\/[^/]+/, '') || '/'}</span>
+                <span className="mono-sm" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {ev.conversion_goals?.name || '—'}
+                </span>
+                <span className="mono-sm">{ev.device_type || '—'}</span>
+                <span className="mono-sm">{ev.utm_source || 'direct'}</span>
+                <span className="mono-sm" style={{ fontSize: '0.72rem', color: 'var(--text3)' }}>
+                  {new Date(ev.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  <br />
+                  {new Date(ev.ts).toLocaleDateString()}
+                </span>
+                <span>
+                  <button
+                    className="btn-icon-danger"
+                    onClick={() => handleDeleteEvent(ev.id)}
+                    title="Delete this event"
+                  >✕</button>
+                </span>
+              </div>
+            ))}
+          </div>
+        )
+      )}
     </div>
   );
 }

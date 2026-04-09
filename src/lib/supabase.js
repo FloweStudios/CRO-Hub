@@ -143,3 +143,36 @@ export async function deleteGoal(id) {
   const { error } = await supabase.from('conversion_goals').delete().eq('id', id);
   return { error };
 }
+
+export async function getConversionEvents(clientId, days = 30) {
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+
+  const { data, error } = await supabase
+    .from('conversion_events')
+    .select(`
+      id,
+      ts,
+      url,
+      device_type,
+      utm_source,
+      utm_medium,
+      visitor_id,
+      session_id,
+      goal_id,
+      conversion_goals ( name )
+    `)
+    .eq('client_id', clientId)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(200);
+
+  return { data: data || [], error };
+}
+
+export async function deleteConversionEvent(id) {
+  const { error } = await supabase
+    .from('conversion_events')
+    .delete()
+    .eq('id', id);
+  return { error };
+}
