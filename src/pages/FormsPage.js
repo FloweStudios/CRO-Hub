@@ -217,11 +217,11 @@ function FormDetail({ form }) {
         )}
       </div>
 
-      {!v => v.is_current && activeVersion && (
-        <div className="version-archive-notice">
-          Viewing archived version v{activeVersion?.version_number} — field structure changed on {new Date(activeVersion?.last_seen).toLocaleDateString()}
-        </div>
-      )}
+      {activeVersion && !activeVersion.is_current && (
+  <div className="version-archive-notice">
+    Viewing archived version v{activeVersion.version_number} — field structure changed on {new Date(activeVersion.last_seen).toLocaleDateString()}
+  </div>
+)}
 
       {loading ? (
         <div className="loading-state"><div className="spinner lg" /></div>
