@@ -378,3 +378,104 @@ code { font-family: var(--mono); font-size: 0.88em; }
 
 /* Misc */
 .field-optional { font-weight: 400; color: var(--text3); text-transform: none; letter-spacing: 0; }
+
+/* â”€â”€ Add to the bottom of App.css â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+/* Goals tabs */
+.goals-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px;
+  margin-bottom: 20px;
+  width: fit-content;
+}
+.goals-tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 16px;
+  border-radius: 7px;
+  font-size: 0.85rem;
+  color: var(--text2);
+  transition: background 0.12s, color 0.12s;
+}
+.goals-tab:hover { color: var(--text); }
+.goals-tab.active { background: var(--bg); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+.goals-tab-count {
+  background: var(--bg3);
+  color: var(--text3);
+  font-size: 0.72rem;
+  font-family: var(--mono);
+  padding: 1px 7px;
+  border-radius: 20px;
+  min-width: 20px;
+  text-align: center;
+}
+.goals-tab.active .goals-tab-count { background: var(--accent-dim); color: var(--accent); }
+
+/* Conversion events table */
+.conv-events-table {
+  background: var(--bg1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.conv-events-head {
+  display: grid;
+  grid-template-columns: 160px 1fr 90px 100px 130px 36px;
+  gap: 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.conv-events-row {
+  display: grid;
+  grid-template-columns: 160px 1fr 90px 100px 130px 36px;
+  gap: 0;
+  padding: 11px 16px;
+  border-top: 1px solid var(--border);
+  align-items: center;
+  transition: background 0.1s;
+}
+.conv-events-row:hover { background: var(--bg2); }
+
+.ce-col-goal    { min-width: 0; }
+.ce-col-page    { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 12px; }
+.ce-col-device  { }
+.ce-col-source  { font-size: 0.82rem; }
+.ce-col-date    { display: flex; flex-direction: column; gap: 1px; }
+.ce-col-action  { display: flex; justify-content: flex-end; }
+
+.ce-goal-name {
+  font-size: 0.88rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.ce-date { font-size: 0.82rem; color: var(--text2); }
+.ce-time { font-size: 0.75rem; color: var(--text3); font-family: var(--mono); }
+
+/* Device pills */
+.device-pill {
+  display: inline-block;
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+.device-mobile  { background: var(--green-dim);   color: var(--green);  }
+.device-tablet  { background: var(--amber-dim);   color: var(--amber);  }
+.device-desktop { background: var(--accent-dim);  color: var(--accent); }

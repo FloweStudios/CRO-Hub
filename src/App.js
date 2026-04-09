@@ -365,13 +365,16 @@ function OverviewPage({ partner, days }) {
 
 // ─── Goals page ───────────────────────────────────────────────────────────────
 
+// REPLACE the entire GoalsPage function in App.js with this.
+
 function GoalsPage({ partner, days }) {
-  const [goals, setGoals]       = useState([]);
-  const [events, setEvents]     = useState([]);
-  const [loading, setLoading]   = useState(true);
+  const [goals, setGoals]             = useState([]);
+  const [events, setEvents]           = useState([]);
+  const [loading, setLoading]         = useState(true);
   const [eventsLoading, setEventsLoading] = useState(true);
-  const [showAdd, setShowAdd]   = useState(false);
-  const [tab, setTab]           = useState('goals'); // 'goals' | 'events'
+  const [showAdd, setShowAdd]         = useState(false);
+  const [tab, setTab]                 = useState('goals');
+  const [confirmDelete, setConfirmDelete] = useState(null); // { id, type: 'goal'|'event', label }
 
   const loadGoals = useCallback(async () => {
     setLoading(true);
@@ -395,14 +398,16 @@ function GoalsPage({ partner, days }) {
     loadGoals();
   }
 
-  async function handleDeleteGoal(id) {
-    await deleteGoal(id);
-    loadGoals();
-  }
-
-  async function handleDeleteEvent(id) {
-    await deleteConversionEvent(id);
-    setEvents(prev => prev.filter(e => e.id !== id));
+  async function handleConfirmDelete() {
+    if (!confirmDelete) return;
+    if (confirmDelete.type === 'goal') {
+      await deleteGoal(confirmDelete.id);
+      loadGoals();
+    } else {
+      await deleteConversionEvent(confirmDelete.id);
+      setEvents(prev => prev.filter(e => e.id !== confirmDelete.id));
+    }
+    setConfirmDelete(null);
   }
 
   const typeLabels = {
@@ -411,21 +416,58 @@ function GoalsPage({ partner, days }) {
     page_load: 'Page load', form_submit: 'Form submit',
   };
 
+  const typeColors = {
+    click: 'type-click', click_url: 'type-click',
+    element_visible: 'type-element_visible',
+    page_load: 'type-page_load', form_submit: 'type-form_submit',
+  };
+
   return (
     <div className="goals-content">
+
+      {/* Confirm delete modal */}
+      {confirmDelete && (
+        <div className="modal-backdrop" onClick={() => setConfirmDelete(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Delete {confirmDelete.type === 'goal' ? 'goal' : 'event'}?</h3>
+              <button className="modal-close" onClick={() => setConfirmDelete(null)}>✕</button>
+            </div>
+            <p style={{ color: 'var(--text2)', fontSize: '0.9rem', lineHeight: 1.6, marginBottom: 8 }}>
+              {confirmDelete.type === 'goal'
+                ? <>Deleting <strong style={{ color: 'var(--text)' }}>{confirmDelete.label}</strong> will remove the goal and stop tracking future conversions. Historical conversion events will remain.</>
+                : <>This will permanently remove the conversion event for <strong style={{ color: 'var(--text)' }}>{confirmDelete.label}</strong>. This cannot be undone.</>
+              }
+            </p>
+            <div className="modal-actions">
+              <button className="btn-ghost" onClick={() => setConfirmDelete(null)}>Cancel</button>
+              <button className="btn-danger" onClick={handleConfirmDelete}>
+                Yes, delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="section-header">
         <div>
-          <h3 className="section-title">Conversion goals</h3>
-          <p className="section-sub">Define what counts as a conversion on {partner.domain}</p>
+          <h3 className="section-title">Conversions</h3>
+          <p className="section-sub">Goals and conversion events for {partner.domain}</p>
         </div>
         {tab === 'goals' && (
           <button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add goal</button>
         )}
       </div>
 
-      <div className="tabs" style={{ marginBottom: 20 }}>
-        <button className={`tab ${tab === 'goals' ? 'active' : ''}`} onClick={() => setTab('goals')}>Goals</button>
-        <button className={`tab ${tab === 'events' ? 'active' : ''}`} onClick={() => setTab('events')}>Conversion events</button>
+      <div className="goals-tabs">
+        <button className={`goals-tab ${tab === 'goals' ? 'active' : ''}`} onClick={() => setTab('goals')}>
+          Goals
+          <span className="goals-tab-count">{goals.length}</span>
+        </button>
+        <button className={`goals-tab ${tab === 'events' ? 'active' : ''}`} onClick={() => setTab('events')}>
+          Conversion events
+          <span className="goals-tab-count">{events.length || ''}</span>
+        </button>
       </div>
 
       {showAdd && (
@@ -436,86 +478,112 @@ function GoalsPage({ partner, days }) {
         />
       )}
 
+      {/* ── Goals tab ─────────────────────────────────────────────────────── */}
       {tab === 'goals' && (
-        loading ? <div className="loading-state"><div className="spinner lg" /></div>
-        : goals.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon">◎</div>
-            <h3>No goals yet</h3>
-            <p>Add a conversion goal to start tracking what matters.</p>
-          </div>
-        ) : (
-          <div className="goals-list">
-            {goals.map(goal => (
-              <div key={goal.id} className={`goal-row ${!goal.active ? 'inactive' : ''}`}>
-                <div className="goal-info">
-                  <span className="goal-name">{goal.name}</span>
-                  <span className={`goal-type-pill type-${goal.type}`}>{typeLabels[goal.type] || goal.type}</span>
-                  <span className="goal-detail mono-sm">
-                    {goal.css_selector || goal.url_pattern || '—'}
-                  </span>
-                </div>
-                <div className="goal-actions">
-                  <button
-                    className={`toggle-btn ${goal.active ? 'on' : 'off'}`}
-                    onClick={() => handleToggle(goal.id, !goal.active)}
-                  >
-                    {goal.active ? 'Active' : 'Paused'}
-                  </button>
-                  <button className="btn-icon-danger" onClick={() => handleDeleteGoal(goal.id)}>✕</button>
-                </div>
+        loading
+          ? <div className="loading-state"><div className="spinner lg" /></div>
+          : goals.length === 0
+            ? (
+              <div className="empty-state">
+                <div className="empty-icon">◎</div>
+                <h3>No goals yet</h3>
+                <p>Add a conversion goal to start tracking what matters.</p>
+                <button className="btn-primary" onClick={() => setShowAdd(true)}>Add your first goal</button>
               </div>
-            ))}
-          </div>
-        )
+            )
+            : (
+              <div className="goals-list">
+                {goals.map(goal => (
+                  <div key={goal.id} className={`goal-row ${!goal.active ? 'inactive' : ''}`}>
+                    <div className="goal-info">
+                      <span className="goal-name">{goal.name}</span>
+                      <span className={`goal-type-pill ${typeColors[goal.type] || 'type-click'}`}>
+                        {typeLabels[goal.type] || goal.type}
+                      </span>
+                      <span className="goal-detail mono-sm">
+                        {goal.css_selector || goal.url_pattern || '—'}
+                      </span>
+                    </div>
+                    <div className="goal-actions">
+                      <button
+                        className={`toggle-btn ${goal.active ? 'on' : 'off'}`}
+                        onClick={() => handleToggle(goal.id, !goal.active)}
+                      >
+                        {goal.active ? 'Active' : 'Paused'}
+                      </button>
+                      <button
+                        className="btn-icon-danger"
+                        onClick={() => setConfirmDelete({ id: goal.id, type: 'goal', label: goal.name })}
+                      >✕</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
       )}
 
+      {/* ── Events tab ────────────────────────────────────────────────────── */}
       {tab === 'events' && (
-        eventsLoading ? <div className="loading-state"><div className="spinner lg" /></div>
-        : events.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon">◎</div>
-            <h3>No conversion events yet</h3>
-            <p>Conversion events will appear here once goals are triggered.</p>
-          </div>
-        ) : (
-          <div className="data-table">
-            <div className="table-head" style={{ gridTemplateColumns: '1fr 140px 90px 90px 80px 36px' }}>
-              <span>Page</span>
-              <span>Goal</span>
-              <span>Device</span>
-              <span>Source</span>
-              <span>Time</span>
-              <span></span>
-            </div>
-            {events.map(ev => (
-              <div key={ev.id} className="table-row" style={{ gridTemplateColumns: '1fr 140px 90px 90px 80px 36px' }}>
-                <span className="col-url mono-sm">{ev.url.replace(/^https?:\/\/[^/]+/, '') || '/'}</span>
-                <span className="mono-sm" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {ev.conversion_goals?.name || '—'}
-                </span>
-                <span className="mono-sm">{ev.device_type || '—'}</span>
-                <span className="mono-sm">{ev.utm_source || 'direct'}</span>
-                <span className="mono-sm" style={{ fontSize: '0.72rem', color: 'var(--text3)' }}>
-                  {new Date(ev.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  <br />
-                  {new Date(ev.ts).toLocaleDateString()}
-                </span>
-                <span>
-                  <button
-                    className="btn-icon-danger"
-                    onClick={() => handleDeleteEvent(ev.id)}
-                    title="Delete this event"
-                  >✕</button>
-                </span>
+        eventsLoading
+          ? <div className="loading-state"><div className="spinner lg" /></div>
+          : events.length === 0
+            ? (
+              <div className="empty-state">
+                <div className="empty-icon">◎</div>
+                <h3>No conversion events yet</h3>
+                <p>Events will appear here once visitors trigger a goal.</p>
               </div>
-            ))}
-          </div>
-        )
+            )
+            : (
+              <div className="conv-events-table">
+                <div className="conv-events-head">
+                  <span className="ce-col-goal">Goal</span>
+                  <span className="ce-col-page">Page</span>
+                  <span className="ce-col-device">Device</span>
+                  <span className="ce-col-source">Source</span>
+                  <span className="ce-col-date">Date &amp; time</span>
+                  <span className="ce-col-action"></span>
+                </div>
+                {events.map(ev => (
+                  <div key={ev.id} className="conv-events-row">
+                    <span className="ce-col-goal">
+                      <span className="ce-goal-name">{ev.conversion_goals?.name || '—'}</span>
+                    </span>
+                    <span className="ce-col-page mono-sm">
+                      {ev.url.replace(/^https?:\/\/[^/]+/, '') || '/'}
+                    </span>
+                    <span className="ce-col-device">
+                      <span className={`device-pill device-${ev.device_type}`}>
+                        {ev.device_type || '—'}
+                      </span>
+                    </span>
+                    <span className="ce-col-source mono-sm">
+                      {ev.utm_source || 'direct'}
+                    </span>
+                    <span className="ce-col-date">
+                      <span className="ce-date">{new Date(ev.ts).toLocaleDateString()}</span>
+                      <span className="ce-time">{new Date(ev.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </span>
+                    <span className="ce-col-action">
+                      <button
+                        className="btn-icon-danger"
+                        title="Delete event"
+                        onClick={() => setConfirmDelete({
+                          id: ev.id,
+                          type: 'event',
+                          label: ev.conversion_goals?.name || ev.url,
+                        })}
+                      >✕</button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )
       )}
     </div>
   );
 }
+
 
 // REPLACE the entire AddGoalModal function in App.js with this:
 
