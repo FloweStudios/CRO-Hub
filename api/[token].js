@@ -232,7 +232,10 @@ function _getFormFields(container){
 
 function _normFormId(sel){
   // Normalise selector to a plain ID string for event form_id field
-  return sel.replace(/^#/,'').replace(/^form#/,'').replace(/^\./,'').trim();
+  if(sel.charAt(0)==='#')sel=sel.slice(1);
+if(sel.indexOf('form#')===0)sel=sel.slice(5);
+if(sel.charAt(0)==='.')sel=sel.slice(1);
+return sel.trim();
 }
 
 function _initFormTracking(){
