@@ -174,5 +174,12 @@ export async function deleteConversionEvent(id) {
     .from('conversion_events')
     .delete()
     .eq('id', id);
-  return { error };
+
+  if (error) {
+    console.error('[delete] conversion_events error:', error.message);
+    throw error; // surface the error so UI can handle it
+  }
+  return { success: true };
 }
+
+

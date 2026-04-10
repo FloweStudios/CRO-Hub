@@ -401,17 +401,27 @@ function GoalsPage({ partner, days }) {
     loadGoals();
   }
 
-  async function handleConfirmDelete() {
-    if (!confirmDelete) return;
+async function handleConfirmDelete() {
+  if (!confirmDelete) return;
+  try {
     if (confirmDelete.type === 'goal') {
       await deleteGoal(confirmDelete.id);
       loadGoals();
     } else {
+      // Await the delete — if it throws, the catch will handle it
       await deleteConversionEvent(confirmDelete.id);
-      setEvents(prev => prev.filter(e => e.id !== confirmDelete.id));
+      // Reload from server rather than optimistic update
+      // so we're certain Supabase reflects the deletion
+      await loadEvents();
     }
     setConfirmDelete(null);
+  } catch (err) {
+    console.error('Delete failed:', err);
+    alert('Delete failed: ' + (err.message || 'Unknown error'));
+    setConfirmDelete(null);
   }
+}
+
 
   const typeLabels = {
     click: 'Click', click_url: 'Click URL',
