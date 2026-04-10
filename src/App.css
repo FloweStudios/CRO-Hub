@@ -973,3 +973,46 @@ select.field-input { cursor: pointer; }
   background: var(--red-dim); color: #ff8a80;
   border: 1px solid rgba(231,76,60,0.3);
 }
+/* ── Goal status badge (replaces toggle pill) ───────────────────────────────── */
+.goal-status-badge { font-size: 0.72rem; font-weight: 600; padding: 2px 9px; border-radius: 20px; letter-spacing: 0.04em; text-transform: uppercase; }
+.status-active { background: var(--green-dim); color: var(--green); border: 1px solid rgba(46,204,113,0.3); }
+.status-paused { background: rgba(255,255,255,0.05); color: var(--text3); border: 1px solid var(--border); }
+
+/* Goal status toggle inside edit modal */
+.goal-status-toggle { display: flex; gap: 3px; }
+.status-opt { padding: 7px 18px; border-radius: 6px; font-size: 0.85rem; font-weight: 500; color: var(--text2); background: rgba(255,255,255,0.05); border: 1px solid var(--border); cursor: pointer; transition: all 0.12s; }
+.status-opt.active { background: var(--accent-dim); border-color: var(--border-accent); color: var(--accent-1); }
+
+/* Clickable conversion event rows */
+.conv-events-row-clickable { cursor: pointer; }
+.conv-events-row-clickable:hover { background: rgba(34,187,242,0.06); }
+
+/* ── Session path modal ──────────────────────────────────────────────────────── */
+.session-path-meta { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.session-path-steps { display: flex; flex-direction: column; gap: 0; }
+.session-path-step { display: flex; align-items: flex-start; gap: 12px; position: relative; }
+.sp-index { width: 26px; height: 26px; border-radius: 50%; background: var(--bg3); border: 1px solid var(--border-md); display: flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 600; color: var(--text2); flex-shrink: 0; margin-top: 2px; }
+.sp-index.conv { background: var(--green-dim); border-color: rgba(46,204,113,0.4); color: var(--green); }
+.sp-body { flex: 1; padding-bottom: 16px; }
+.sp-url { font-family: var(--mono); font-size: 0.85rem; color: var(--white); margin-bottom: 4px; }
+.sp-stats { display: flex; gap: 14px; }
+.sp-stat { font-size: 0.8rem; color: var(--text2); display: flex; align-items: center; gap: 4px; }
+.sp-stat-label { font-size: 0.7rem; color: var(--text3); text-transform: uppercase; letter-spacing: 0.05em; margin-right: 2px; }
+.sp-arrow { font-size: 0.8rem; color: var(--text3); margin: 0 0 8px 7px; }
+.step-conversion .sp-url { color: var(--green); font-family: inherit; font-weight: 500; }
+
+/* ── Path cards (new paths view) ─────────────────────────────────────────────── */
+.path-card { background: var(--blue-4); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 10px; transition: border-color 0.12s; }
+.path-card:hover { border-color: var(--border-md); }
+.path-card-header { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.path-steps-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.path-step-card { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; min-width: 0; }
+.psc-url { font-family: var(--mono); font-size: 0.78rem; color: var(--text2); margin-bottom: 4px; word-break: break-all; }
+.psc-stats { display: flex; gap: 10px; }
+.psc-stat { font-size: 0.75rem; color: var(--text3); display: flex; align-items: center; gap: 3px; }
+.psc-stat-icon { opacity: 0.5; }
+.path-step-conv { background: var(--green-dim); border-color: rgba(46,204,113,0.3); color: var(--green); font-size: 0.82rem; font-weight: 500; white-space: nowrap; }
+
+/* ── Page influence ──────────────────────────────────────────────────────────── */
+.influence-sort-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.influence-sub { font-size: 0.78rem; color: var(--text3); margin-left: auto; }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { supabase, signIn, signOut, onAuthChange, getPartners, createPartner, deletePartner, getGoals, createGoal, toggleGoal, deleteGoal } from './lib/supabase';
+import { supabase, signIn, signOut, onAuthChange, getPartners, createPartner, deletePartner, getGoals, createGoal, updateGoal, deleteGoal } from './lib/supabase';
 import { generateSnippet } from './lib/snippet';
-import { getOverview, getDailySeries, getTopPages, getSources, getConversionPaths, getFormAnalytics, getVisitorLatency } from './lib/analytics';
+import { getOverview, getDailySeries, getTopPages, getSources, getConversionPaths, getPageInfluence, getSessionPath, getFormAnalytics, getVisitorLatency } from './lib/analytics';
 import './App.css';
 import FormsPage from './pages/FormsPage';
 import { getConversionEvents, deleteConversionEvent } from './lib/supabase';
@@ -496,16 +496,17 @@ function OverviewPage({ partner, filter }) {
 
 // ─── Goals page ───────────────────────────────────────────────────────────────
 
-// REPLACE the entire GoalsPage function in App.js with this.
-
 function GoalsPage({ partner, filter }) {
   const [goals, setGoals]             = useState([]);
   const [events, setEvents]           = useState([]);
   const [loading, setLoading]         = useState(true);
   const [eventsLoading, setEventsLoading] = useState(true);
   const [showAdd, setShowAdd]         = useState(false);
+  const [editGoal, setEditGoal]       = useState(null); // goal object to edit
   const [tab, setTab]                 = useState('goals');
-  const [confirmDelete, setConfirmDelete] = useState(null); // { id, type: 'goal'|'event', label }
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [sessionPath, setSessionPath] = useState(null); // { ev, steps[] }
+  const [pathLoading, setPathLoading] = useState(false);
 
   const loadGoals = useCallback(async () => {
     setLoading(true);
@@ -517,7 +518,7 @@ function GoalsPage({ partner, filter }) {
   const loadEvents = useCallback(async () => {
     setEventsLoading(true);
     const since = filter?.dateFrom ? new Date(filter.dateFrom).toISOString() : new Date(Date.now() - 30 * 86400000).toISOString();
-    const { data } = await getConversionEvents(partner.id, 365); // fetch wide, filter client-side via date range
+    const { data } = await getConversionEvents(partner.id, 365);
     setEvents((data || []).filter(e => !filter?.dateFrom || e.ts >= since));
     setEventsLoading(false);
   }, [partner.id, JSON.stringify(filter)]); // eslint-disable-line
@@ -525,44 +526,28 @@ function GoalsPage({ partner, filter }) {
   useEffect(() => { loadGoals(); }, [loadGoals]);
   useEffect(() => { if (tab === 'events') loadEvents(); }, [tab, loadEvents]);
 
-  async function handleToggle(id, active) {
-    await toggleGoal(id, active);
-    loadGoals();
-  }
-
-async function handleConfirmDelete() {
-  if (!confirmDelete) return;
-  try {
-    if (confirmDelete.type === 'goal') {
-      await deleteGoal(confirmDelete.id);
-      loadGoals();
-    } else {
-      // Await the delete — if it throws, the catch will handle it
-      await deleteConversionEvent(confirmDelete.id);
-      // Reload from server rather than optimistic update
-      // so we're certain Supabase reflects the deletion
-      await loadEvents();
+  async function handleConfirmDelete() {
+    if (!confirmDelete) return;
+    try {
+      if (confirmDelete.type === 'goal') { await deleteGoal(confirmDelete.id); loadGoals(); }
+      else { await deleteConversionEvent(confirmDelete.id); await loadEvents(); }
+      setConfirmDelete(null);
+    } catch (err) {
+      alert('Delete failed: ' + (err.message || 'Unknown error'));
+      setConfirmDelete(null);
     }
-    setConfirmDelete(null);
-  } catch (err) {
-    console.error('Delete failed:', err);
-    alert('Delete failed: ' + (err.message || 'Unknown error'));
-    setConfirmDelete(null);
   }
-}
 
+  async function handleEventClick(ev) {
+    setPathLoading(true);
+    setSessionPath({ ev, steps: [] });
+    const steps = await getSessionPath(partner.id, ev.session_id);
+    setSessionPath({ ev, steps });
+    setPathLoading(false);
+  }
 
-  const typeLabels = {
-    click: 'Click', click_url: 'Click URL',
-    element_visible: 'Element visible',
-    page_load: 'Page load', form_submit: 'Form submit',
-  };
-
-  const typeColors = {
-    click: 'type-click', click_url: 'type-click',
-    element_visible: 'type-element_visible',
-    page_load: 'type-page_load', form_submit: 'type-form_submit',
-  };
+  const typeLabels = { click: 'Click', click_url: 'Click URL', element_visible: 'Element visible', page_load: 'Page load', form_submit: 'Form submit' };
+  const typeColors = { click: 'type-click', click_url: 'type-click', element_visible: 'type-element_visible', page_load: 'type-page_load', form_submit: 'type-form_submit' };
 
   return (
     <div className="goals-content">
@@ -577,16 +562,53 @@ async function handleConfirmDelete() {
             </div>
             <p style={{ color: 'var(--text2)', fontSize: '0.9rem', lineHeight: 1.6, marginBottom: 8 }}>
               {confirmDelete.type === 'goal'
-                ? <>Deleting <strong style={{ color: 'var(--text)' }}>{confirmDelete.label}</strong> will remove the goal and stop tracking future conversions. Historical conversion events will remain.</>
-                : <>This will permanently remove the conversion event for <strong style={{ color: 'var(--text)' }}>{confirmDelete.label}</strong>. This cannot be undone.</>
-              }
+                ? <>Deleting <strong style={{ color: 'var(--text)' }}>{confirmDelete.label}</strong> will stop tracking future conversions. Historical events remain.</>
+                : <>Permanently remove this conversion event? This cannot be undone.</>}
             </p>
             <div className="modal-actions">
               <button className="btn-ghost" onClick={() => setConfirmDelete(null)}>Cancel</button>
-              <button className="btn-danger" onClick={handleConfirmDelete}>
-                Yes, delete
-              </button>
+              <button className="btn-danger" onClick={handleConfirmDelete}>Yes, delete</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Session path modal */}
+      {sessionPath && (
+        <div className="modal-backdrop" onClick={() => setSessionPath(null)}>
+          <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Conversion path</h3>
+              <button className="modal-close" onClick={() => setSessionPath(null)}>✕</button>
+            </div>
+            <div className="session-path-meta">
+              <span className="ce-goal-name">{sessionPath.ev.conversion_goals?.name || '—'}</span>
+              <span className="mono-sm" style={{ color: 'var(--text3)' }}>{new Date(sessionPath.ev.ts).toLocaleString()}</span>
+              {sessionPath.ev.utm_source && <span className="medium-pill medium-referral">{sessionPath.ev.utm_source}</span>}
+            </div>
+            {pathLoading ? <div className="loading-state"><div className="spinner lg" /></div> : (
+              sessionPath.steps.length === 0
+                ? <p style={{ color: 'var(--text3)', padding: '20px 0' }}>No pageview data found for this session.</p>
+                : <div className="session-path-steps">
+                    {sessionPath.steps.map((step, i) => (
+                      <div key={i} className="session-path-step">
+                        <div className="sp-index">{i + 1}</div>
+                        <div className="sp-body">
+                          <div className="sp-url mono-sm">{step.path}</div>
+                          <div className="sp-stats">
+                            {step.timeMs != null && <span className="sp-stat"><span className="sp-stat-label">Time</span>{fmtTime(Math.round(step.timeMs / 1000))}</span>}
+                            {step.maxDepth != null && <span className="sp-stat"><span className="sp-stat-label">Scroll</span>{step.maxDepth}%</span>}
+                          </div>
+                        </div>
+                        {i < sessionPath.steps.length - 1 && <div className="sp-arrow">↓</div>}
+                      </div>
+                    ))}
+                    <div className="session-path-step step-conversion">
+                      <div className="sp-index conv">✓</div>
+                      <div className="sp-body"><div className="sp-url">Converted — {sessionPath.ev.conversion_goals?.name}</div></div>
+                    </div>
+                  </div>
+            )}
           </div>
         </div>
       )}
@@ -596,67 +618,46 @@ async function handleConfirmDelete() {
           <h3 className="section-title">Conversions</h3>
           <p className="section-sub">Goals and conversion events for {partner.domain}</p>
         </div>
-        {tab === 'goals' && (
-          <button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add goal</button>
-        )}
+        {tab === 'goals' && <button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add goal</button>}
       </div>
 
       <div className="goals-tabs">
         <button className={`goals-tab ${tab === 'goals' ? 'active' : ''}`} onClick={() => setTab('goals')}>
-          Goals
-          <span className="goals-tab-count">{goals.length}</span>
+          Goals <span className="goals-tab-count">{goals.length}</span>
         </button>
         <button className={`goals-tab ${tab === 'events' ? 'active' : ''}`} onClick={() => setTab('events')}>
-          Conversion events
-          <span className="goals-tab-count">{events.length || ''}</span>
+          Conversion events <span className="goals-tab-count">{events.length || ''}</span>
         </button>
       </div>
 
-      {showAdd && (
-        <AddGoalModal
+      {(showAdd || editGoal) && (
+        <GoalModal
           clientId={partner.id}
-          onClose={() => setShowAdd(false)}
-          onCreated={() => { setShowAdd(false); loadGoals(); }}
+          goal={editGoal}
+          onClose={() => { setShowAdd(false); setEditGoal(null); }}
+          onSaved={() => { setShowAdd(false); setEditGoal(null); loadGoals(); }}
         />
       )}
 
-      {/* ── Goals tab ─────────────────────────────────────────────────────── */}
+      {/* ── Goals tab ── */}
       {tab === 'goals' && (
         loading
           ? <div className="loading-state"><div className="spinner lg" /></div>
           : goals.length === 0
-            ? (
-              <div className="empty-state">
-                <div className="empty-icon">◎</div>
-                <h3>No goals yet</h3>
-                <p>Add a conversion goal to start tracking what matters.</p>
-                <button className="btn-primary" onClick={() => setShowAdd(true)}>Add your first goal</button>
-              </div>
-            )
+            ? <div className="empty-state"><div className="empty-icon">◎</div><h3>No goals yet</h3><p>Add a conversion goal to start tracking what matters.</p><button className="btn-primary" onClick={() => setShowAdd(true)}>Add your first goal</button></div>
             : (
               <div className="goals-list">
                 {goals.map(goal => (
                   <div key={goal.id} className={`goal-row ${!goal.active ? 'inactive' : ''}`}>
                     <div className="goal-info">
                       <span className="goal-name">{goal.name}</span>
-                      <span className={`goal-type-pill ${typeColors[goal.type] || 'type-click'}`}>
-                        {typeLabels[goal.type] || goal.type}
-                      </span>
-                      <span className="goal-detail mono-sm">
-                        {goal.css_selector || goal.url_pattern || '—'}
-                      </span>
+                      <span className={`goal-type-pill ${typeColors[goal.type] || 'type-click'}`}>{typeLabels[goal.type] || goal.type}</span>
+                      <span className="goal-detail mono-sm">{goal.css_selector || goal.url_pattern || '—'}</span>
+                      <span className={`goal-status-badge ${goal.active ? 'status-active' : 'status-paused'}`}>{goal.active ? 'Active' : 'Paused'}</span>
                     </div>
                     <div className="goal-actions">
-                      <button
-                        className={`toggle-btn ${goal.active ? 'on' : 'off'}`}
-                        onClick={() => handleToggle(goal.id, !goal.active)}
-                      >
-                        {goal.active ? 'Active' : 'Paused'}
-                      </button>
-                      <button
-                        className="btn-icon-danger"
-                        onClick={() => setConfirmDelete({ id: goal.id, type: 'goal', label: goal.name })}
-                      >✕</button>
+                      <button className="btn-ghost btn-sm" onClick={() => setEditGoal(goal)}>Edit</button>
+                      <button className="btn-icon-danger" onClick={() => setConfirmDelete({ id: goal.id, type: 'goal', label: goal.name })}>✕</button>
                     </div>
                   </div>
                 ))}
@@ -664,18 +665,12 @@ async function handleConfirmDelete() {
             )
       )}
 
-      {/* ── Events tab ────────────────────────────────────────────────────── */}
+      {/* ── Events tab ── */}
       {tab === 'events' && (
         eventsLoading
           ? <div className="loading-state"><div className="spinner lg" /></div>
           : events.length === 0
-            ? (
-              <div className="empty-state">
-                <div className="empty-icon">◎</div>
-                <h3>No conversion events yet</h3>
-                <p>Events will appear here once visitors trigger a goal.</p>
-              </div>
-            )
+            ? <div className="empty-state"><div className="empty-icon">◎</div><h3>No conversion events yet</h3><p>Events will appear here once visitors trigger a goal.</p></div>
             : (
               <div className="conv-events-table">
                 <div className="conv-events-head">
@@ -687,35 +682,17 @@ async function handleConfirmDelete() {
                   <span className="ce-col-action"></span>
                 </div>
                 {events.map(ev => (
-                  <div key={ev.id} className="conv-events-row">
-                    <span className="ce-col-goal">
-                      <span className="ce-goal-name">{ev.conversion_goals?.name || '—'}</span>
-                    </span>
-                    <span className="ce-col-page mono-sm">
-                      {ev.url.replace(/^https?:\/\/[^/]+/, '') || '/'}
-                    </span>
-                    <span className="ce-col-device">
-                      <span className={`device-pill device-${ev.device_type}`}>
-                        {ev.device_type || '—'}
-                      </span>
-                    </span>
-                    <span className="ce-col-source mono-sm">
-                      {ev.utm_source || 'direct'}
-                    </span>
+                  <div key={ev.id} className="conv-events-row conv-events-row-clickable" onClick={() => handleEventClick(ev)}>
+                    <span className="ce-col-goal"><span className="ce-goal-name">{ev.conversion_goals?.name || '—'}</span></span>
+                    <span className="ce-col-page mono-sm">{ev.url.replace(/^https?:\/\/[^/]+/, '') || '/'}</span>
+                    <span className="ce-col-device"><span className={`device-pill device-${ev.device_type}`}>{ev.device_type || '—'}</span></span>
+                    <span className="ce-col-source mono-sm">{ev.utm_source || 'direct'}</span>
                     <span className="ce-col-date">
                       <span className="ce-date">{new Date(ev.ts).toLocaleDateString()}</span>
                       <span className="ce-time">{new Date(ev.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     </span>
                     <span className="ce-col-action">
-                      <button
-                        className="btn-icon-danger"
-                        title="Delete event"
-                        onClick={() => setConfirmDelete({
-                          id: ev.id,
-                          type: 'event',
-                          label: ev.conversion_goals?.name || ev.url,
-                        })}
-                      >✕</button>
+                      <button className="btn-icon-danger" title="Delete event" onClick={e => { e.stopPropagation(); setConfirmDelete({ id: ev.id, type: 'event', label: ev.conversion_goals?.name || ev.url }); }}>✕</button>
                     </span>
                   </div>
                 ))}
@@ -726,70 +703,56 @@ async function handleConfirmDelete() {
   );
 }
 
+// ─── Unified add/edit goal modal ──────────────────────────────────────────────
 
-// REPLACE the entire AddGoalModal function in App.js with this:
+function GoalModal({ clientId, goal, onClose, onSaved }) {
+  // If goal is passed we're editing; otherwise adding
+  const isEdit = !!goal;
 
-function AddGoalModal({ clientId, onClose, onCreated }) {
-  const [name, setName] = useState('');
-  const [type, setType] = useState('click');
-  const [selector, setSelector] = useState('');
-  const [urlPattern, setUrlPattern] = useState('');
-  const [matchType, setMatchType] = useState('exact');
-  // For click_url: the href pattern to match
-  const [clickUrlPattern, setClickUrlPattern] = useState('');
-  const [clickUrlMatch, setClickUrlMatch] = useState('contains');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [name, setName]                     = useState(goal?.name || '');
+  const [type, setType]                     = useState(goal?.type || 'click');
+  const [active, setActive]                 = useState(goal?.active ?? true);
+  const [selector, setSelector]             = useState(goal?.css_selector || '');
+  const [urlPattern, setUrlPattern]         = useState(goal?.type === 'page_load' ? (goal?.url_pattern || '') : '');
+  const [matchType, setMatchType]           = useState(goal?.match_type || 'exact');
+  const [clickUrlPattern, setClickUrlPattern] = useState(goal?.type === 'click_url' ? (goal?.url_pattern || '') : '');
+  const [clickUrlMatch, setClickUrlMatch]   = useState(goal?.match_type || 'contains');
+  const [loading, setLoading]               = useState(false);
+  const [error, setError]                   = useState('');
 
   async function handleSubmit(e) {
     e.preventDefault(); setError('');
     if (!name.trim()) { setError('Name is required'); return; }
 
-    let cssSelector = null;
-    let finalUrlPattern = null;
-    let finalMatchType = matchType;
-
+    let cssSelector = null, finalUrlPattern = null, finalMatchType = matchType;
     if (type === 'click') {
-      // Standard click — CSS selector required
       if (!selector.trim()) { setError('CSS selector is required'); return; }
       cssSelector = selector.trim();
     } else if (type === 'click_url') {
-      // Click URL — match href attribute
       if (!clickUrlPattern.trim()) { setError('URL pattern is required'); return; }
-      // We store click_url goals as type=click with a special selector that
-      // matches anchor tags whose href contains the pattern.
-      // The tracker evaluates el.href against this pattern client-side.
-      cssSelector = 'a';                   // match all anchor clicks
-      finalUrlPattern = clickUrlPattern.trim();
-      finalMatchType = clickUrlMatch;
+      cssSelector = 'a'; finalUrlPattern = clickUrlPattern.trim(); finalMatchType = clickUrlMatch;
     } else if (type === 'element_visible' || type === 'form_submit') {
       if (!selector.trim()) { setError('CSS selector is required'); return; }
       cssSelector = selector.trim();
     } else if (type === 'page_load') {
       if (!urlPattern.trim()) { setError('URL pattern is required'); return; }
       finalUrlPattern = urlPattern.trim();
-      finalMatchType = matchType;
     }
 
     setLoading(true);
-    const { error } = await createGoal({
-      clientId,
-      name: name.trim(),
-      // Store click_url as its own type so the tracker knows to check href
-      type: type === 'click_url' ? 'click_url' : type,
-      cssSelector,
-      urlPattern:  finalUrlPattern,
-      matchType:   finalMatchType,
-    });
-    if (error) { setError(error.message); setLoading(false); return; }
-    onCreated();
+    const payload = { name: name.trim(), type: type === 'click_url' ? 'click_url' : type, cssSelector, urlPattern: finalUrlPattern, matchType: finalMatchType, active };
+    const { error: err } = isEdit
+      ? await updateGoal(goal.id, payload)
+      : await createGoal({ clientId, ...payload });
+    if (err) { setError(err.message); setLoading(false); return; }
+    onSaved();
   }
 
   return (
     <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal modal-lg">
         <div className="modal-header">
-          <h3>Add conversion goal</h3>
+          <h3>{isEdit ? 'Edit goal' : 'Add conversion goal'}</h3>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <form onSubmit={handleSubmit}>
@@ -821,9 +784,7 @@ function AddGoalModal({ clientId, onClose, onCreated }) {
 
           {type === 'click_url' && (
             <>
-              <div className="goal-hint-box">
-                Use this to track clicks on phone numbers, email addresses, or any link by its URL. Works exactly like Google Tag Manager's "Click URL" trigger.
-              </div>
+              <div className="goal-hint-box">Track clicks on phone numbers, email addresses, or any link by its URL.</div>
               <div className="field">
                 <label className="field-label">URL match type</label>
                 <select className="field-input" value={clickUrlMatch} onChange={e => setClickUrlMatch(e.target.value)}>
@@ -836,9 +797,7 @@ function AddGoalModal({ clientId, onClose, onCreated }) {
               <div className="field">
                 <label className="field-label">URL pattern</label>
                 <input className="field-input mono" value={clickUrlPattern} onChange={e => setClickUrlPattern(e.target.value)} placeholder="tel:, mailto:, /checkout" />
-                <span className="field-hint">
-                  Examples: <code>tel:</code> for all phone clicks · <code>mailto:</code> for all email clicks · <code>/checkout</code> for checkout links
-                </span>
+                <span className="field-hint">Examples: <code>tel:</code> for phone · <code>mailto:</code> for email · <code>/checkout</code> for checkout links</span>
               </div>
             </>
           )}
@@ -847,7 +806,6 @@ function AddGoalModal({ clientId, onClose, onCreated }) {
             <div className="field">
               <label className="field-label">CSS selector</label>
               <input className="field-input mono" value={selector} onChange={e => setSelector(e.target.value)} placeholder={type === 'form_submit' ? 'form, form#contact' : '#pricing-section, .cta-banner'} />
-              <span className="field-hint">Any valid CSS selector.</span>
             </div>
           )}
 
@@ -860,20 +818,29 @@ function AddGoalModal({ clientId, onClose, onCreated }) {
               <div className="field">
                 <label className="field-label">Match type</label>
                 <select className="field-input" value={matchType} onChange={e => setMatchType(e.target.value)}>
-                  <option value="exact">Exact — URL must match exactly</option>
-                  <option value="contains">Contains — URL contains this string</option>
-                  <option value="starts_with">Starts with — URL starts with this</option>
-                  <option value="regex">Regex — advanced pattern matching</option>
+                  <option value="exact">Exact</option>
+                  <option value="contains">Contains</option>
+                  <option value="starts_with">Starts with</option>
+                  <option value="regex">Regex</option>
                 </select>
               </div>
             </>
           )}
 
+          {/* Status toggle — only shown when editing */}
+          {isEdit && (
+            <div className="field">
+              <label className="field-label">Status</label>
+              <div className="goal-status-toggle">
+                <button type="button" className={`status-opt ${active ? 'active' : ''}`} onClick={() => setActive(true)}>Active</button>
+                <button type="button" className={`status-opt ${!active ? 'active' : ''}`} onClick={() => setActive(false)}>Paused</button>
+              </div>
+            </div>
+          )}
+
           <div className="modal-actions">
             <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn-primary" disabled={loading}>
-              {loading ? <span className="spinner" /> : 'Save goal'}
-            </button>
+            <button type="submit" className="btn-primary" disabled={loading}>{loading ? <span className="spinner" /> : isEdit ? 'Save changes' : 'Save goal'}</button>
           </div>
         </form>
       </div>
@@ -1035,44 +1002,133 @@ function SourcesPage({ partner, filter }) {
 
 // ─── Conversion paths ─────────────────────────────────────────────────────────
 
+// ─── Conversion paths ─────────────────────────────────────────────────────────
+
 function PathsPage({ partner, filter }) {
-  const [paths, setPaths] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [paths, setPaths]           = useState([]);
+  const [influence, setInfluence]   = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [view, setView]             = useState('paths'); // 'paths' | 'influence'
+  const [influenceSort, setInfluenceSort] = useState('sessions');
 
   useEffect(() => {
     setLoading(true);
-    getConversionPaths(partner.id, filter).then(data => { setPaths(data); setLoading(false); });
+    Promise.all([
+      getConversionPaths(partner.id, filter),
+      getPageInfluence(partner.id, filter),
+    ]).then(([p, inf]) => { setPaths(p); setInfluence(inf); setLoading(false); });
   }, [partner.id, JSON.stringify(filter)]); // eslint-disable-line
 
   const maxCount = useMemo(() => Math.max(...paths.map(p => p.count), 1), [paths]);
 
+  const sortedInfluence = useMemo(() => {
+    return [...influence].sort((a, b) => {
+      if (influenceSort === 'sessions') return b.sessions - a.sessions;
+      if (influenceSort === 'time') return (b.avgTimeMs ?? -1) - (a.avgTimeMs ?? -1);
+      if (influenceSort === 'depth') return (b.avgDepth ?? -1) - (a.avgDepth ?? -1);
+      return 0;
+    });
+  }, [influence, influenceSort]);
+
+  const maxInfluence = useMemo(() => Math.max(...sortedInfluence.map(p => p.sessions), 1), [sortedInfluence]);
+
   return (
     <div>
       <div className="section-header">
-        <div><h3 className="section-title">Conversion paths</h3><p className="section-sub">Most common page sequences leading to conversion</p></div>
+        <div>
+          <h3 className="section-title">Conversion paths</h3>
+          <p className="section-sub">Page sequences and key pages in converting sessions</p>
+        </div>
+        <div className="filter-group">
+          <button className={`filter-btn ${view === 'paths' ? 'active' : ''}`} onClick={() => setView('paths')}>Top paths</button>
+          <button className={`filter-btn ${view === 'influence' ? 'active' : ''}`} onClick={() => setView('influence')}>Page influence</button>
+        </div>
       </div>
-      {loading ? <div className="loading-state"><div className="spinner lg" /></div>
-        : paths.length === 0 ? <div className="empty-state"><div className="empty-icon">◈</div><h3>No conversion paths yet</h3><p>Set up conversion goals and collect some data first.</p></div>
-        : (
-          <div className="paths-list">
-            {paths.map((p, i) => (
-              <div key={i} className="path-row">
-                <div className="path-steps">
-                  {p.path.split(' → ').map((step, j, arr) => (
-                    <React.Fragment key={j}>
-                      <span className="path-step mono-sm">{step}</span>
-                      {j < arr.length - 1 && <span className="path-arrow">→</span>}
-                    </React.Fragment>
+
+      {loading ? <div className="loading-state"><div className="spinner lg" /></div> : (
+
+        view === 'paths' ? (
+          paths.length === 0
+            ? <div className="empty-state"><div className="empty-icon">◈</div><h3>No conversion paths yet</h3><p>Set up conversion goals and collect some data first.</p></div>
+            : (
+              <div className="paths-list">
+                {paths.map((p, i) => (
+                  <div key={i} className="path-card">
+                    <div className="path-card-header">
+                      <div className="path-bar-wrap" style={{ flex: 1 }}>
+                        <div className="path-bar" style={{ width: `${(p.count / maxCount) * 100}%` }} />
+                      </div>
+                      <span className="path-count">{p.count} conversion{p.count !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div className="path-steps-row">
+                      {p.steps.map((step, j) => (
+                        <React.Fragment key={j}>
+                          <div className="path-step-card">
+                            <div className="psc-url mono-sm">{step.path}</div>
+                            <div className="psc-stats">
+                              {step.avgTimeMs != null && (
+                                <span className="psc-stat" title="Avg time on page">
+                                  <span className="psc-stat-icon">⏱</span>{fmtTime(Math.round(step.avgTimeMs / 1000))}
+                                </span>
+                              )}
+                              {step.avgDepth != null && (
+                                <span className="psc-stat" title="Avg scroll depth">
+                                  <span className="psc-stat-icon">↕</span>{step.avgDepth}%
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {j < p.steps.length - 1 && <span className="path-arrow">→</span>}
+                        </React.Fragment>
+                      ))}
+                      <span className="path-arrow">→</span>
+                      <div className="path-step-card path-step-conv">✓ Converted</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+        ) : (
+
+          /* ── Page influence view ── */
+          influence.length === 0
+            ? <div className="empty-state"><div className="empty-icon">◈</div><h3>No data yet</h3><p>Set up conversion goals and collect some data first.</p></div>
+            : (
+              <div>
+                <div className="influence-sort-bar">
+                  <span className="gf-label">Sort by</span>
+                  {[['sessions','Frequency'],['time','Avg time'],['depth','Avg scroll']].map(([val, label]) => (
+                    <button key={val} className={`filter-btn ${influenceSort === val ? 'active' : ''}`} onClick={() => setInfluenceSort(val)}>{label}</button>
+                  ))}
+                  <span className="influence-sub">Showing pages visited in converting sessions</span>
+                </div>
+                <div className="data-table">
+                  <div className="table-head">
+                    <span className="col-url">Page</span>
+                    <span className="col-bar">Sessions involved</span>
+                    <span className="col-num">% of convs</span>
+                    <span className="col-num">Avg time</span>
+                    <span className="col-num">Avg scroll</span>
+                  </div>
+                  {sortedInfluence.map((p, i) => (
+                    <div key={i} className="table-row">
+                      <span className="col-url mono-sm">{p.path}</span>
+                      <span className="col-bar">
+                        <div className="bar-cell">
+                          <div className="bar-fill" style={{ width: `${(p.sessions / maxInfluence) * 100}%` }} />
+                          <span className="bar-label">{p.sessions}</span>
+                        </div>
+                      </span>
+                      <span className="col-num">{p.pct.toFixed(1)}%</span>
+                      <span className="col-num">{p.avgTimeMs != null ? fmtTime(Math.round(p.avgTimeMs / 1000)) : '—'}</span>
+                      <span className="col-num">{p.avgDepth != null ? `${p.avgDepth}%` : '—'}</span>
+                    </div>
                   ))}
                 </div>
-                <div className="path-bar-wrap">
-                  <div className="path-bar" style={{ width: `${(p.count / maxCount) * 100}%` }} />
-                </div>
-                <span className="path-count">{p.count}</span>
               </div>
-            ))}
-          </div>
-        )}
+            )
+        )
+      )}
     </div>
   );
 }

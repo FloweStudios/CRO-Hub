@@ -193,27 +193,143 @@ export async function getSources(clientId, filter = {}) {
 
 export async function getConversionPaths(clientId, filter = {}) {
   const { since, until } = resolveRange(filter);
-  const { data: convSessions } = await supabase.from('conversion_events').select('session_id').eq('client_id', clientId).gte('created_at', since).lte('created_at', until);
+  const { data: convSessions } = await supabase
+    .from('conversion_events').select('session_id')
+    .eq('client_id', clientId).gte('created_at', since).lte('created_at', until);
   if (!convSessions || convSessions.length === 0) return [];
 
   const sessionIds = [...new Set(convSessions.map(c => c.session_id))].slice(0, 200);
-  const { data: pageviews } = await supabase.from('events').select('session_id, url, ts').eq('client_id', clientId).eq('type', 'pageview').in('session_id', sessionIds).order('ts', { ascending: true });
-  if (!pageviews) return [];
 
+  // Fetch pageviews, time_on_page and scroll_depth events for these sessions
+  const { data: events } = await supabase
+    .from('events')
+    .select('session_id, type, url, ts, time_on_page_ms, depth_pct')
+    .eq('client_id', clientId)
+    .in('type', ['pageview', 'time_on_page', 'scroll_depth'])
+    .in('session_id', sessionIds)
+    .order('ts', { ascending: true });
+  if (!events) return [];
+
+  // Group per session
+  const sessionData = {};
+  events.forEach(ev => {
+    if (!sessionData[ev.session_id]) sessionData[ev.session_id] = {};
+    const path = ev.url.replace(/^https?:\/\/[^/]+/, '').replace(/\?.*/, '') || '/';
+    if (!sessionData[ev.session_id][path]) sessionData[ev.session_id][path] = { path, order: null, timeMs: null, maxDepth: null };
+    const step = sessionData[ev.session_id][path];
+    if (ev.type === 'pageview' && step.order === null) step.order = new Date(ev.ts).getTime();
+    if (ev.type === 'time_on_page' && ev.time_on_page_ms) step.timeMs = ev.time_on_page_ms;
+    if (ev.type === 'scroll_depth' && ev.depth_pct) step.maxDepth = Math.max(step.maxDepth || 0, ev.depth_pct);
+  });
+
+  // Build ordered step arrays per session
   const sessionPaths = {};
-  pageviews.forEach(pv => {
-    const path = pv.url.replace(/^https?:\/\/[^/]+/, '').replace(/\?.*/, '') || '/';
-    if (!sessionPaths[pv.session_id]) sessionPaths[pv.session_id] = [];
-    sessionPaths[pv.session_id].push(path);
+  Object.entries(sessionData).forEach(([sid, pages]) => {
+    sessionPaths[sid] = Object.values(pages)
+      .filter(p => p.order !== null)
+      .sort((a, b) => a.order - b.order)
+      .slice(0, 4);
   });
 
-  const pathCounts = {};
-  Object.values(sessionPaths).forEach(pages => {
-    const key = pages.slice(0, 4).join(' → ');
-    pathCounts[key] = (pathCounts[key] || 0) + 1;
+  // Aggregate by path string
+  const pathMap = {};
+  Object.values(sessionPaths).forEach(steps => {
+    const key = steps.map(s => s.path).join(' → ');
+    if (!pathMap[key]) pathMap[key] = { path: key, count: 0, steps: steps.map(s => ({ path: s.path, times: [], depths: [] })) };
+    pathMap[key].count++;
+    steps.forEach((s, i) => {
+      if (pathMap[key].steps[i]) {
+        if (s.timeMs != null) pathMap[key].steps[i].times.push(s.timeMs);
+        if (s.maxDepth != null) pathMap[key].steps[i].depths.push(s.maxDepth);
+      }
+    });
   });
 
-  return Object.entries(pathCounts).map(([path, count]) => ({ path, count })).sort((a, b) => b.count - a.count).slice(0, 10);
+  return Object.values(pathMap)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10)
+    .map(p => ({
+      ...p,
+      steps: p.steps.map(s => ({
+        path: s.path,
+        avgTimeMs: s.times.length > 0 ? Math.round(s.times.reduce((a, b) => a + b, 0) / s.times.length) : null,
+        avgDepth:  s.depths.length > 0 ? Math.round(s.depths.reduce((a, b) => a + b, 0) / s.depths.length) : null,
+      })),
+    }));
+}
+
+// Page influence: how often each page appears in a converting session's path,
+// with avg time and avg scroll depth on that page across those appearances.
+export async function getPageInfluence(clientId, filter = {}) {
+  const { since, until } = resolveRange(filter);
+  const { data: convSessions } = await supabase
+    .from('conversion_events').select('session_id')
+    .eq('client_id', clientId).gte('created_at', since).lte('created_at', until);
+  if (!convSessions || convSessions.length === 0) return [];
+
+  const sessionIds = [...new Set(convSessions.map(c => c.session_id))].slice(0, 500);
+
+  const { data: events } = await supabase
+    .from('events')
+    .select('session_id, type, url, time_on_page_ms, depth_pct')
+    .eq('client_id', clientId)
+    .in('type', ['pageview', 'time_on_page', 'scroll_depth'])
+    .in('session_id', sessionIds);
+  if (!events) return [];
+
+  const pageMap = {};
+  const seenSessionPage = new Set(); // count each page once per session
+
+  events.forEach(ev => {
+    const path = ev.url.replace(/^https?:\/\/[^/]+/, '').replace(/\?.*/, '') || '/';
+    if (!pageMap[path]) pageMap[path] = { path, sessions: 0, times: [], depths: [] };
+    const key = `${ev.session_id}|${path}`;
+    if (ev.type === 'pageview' && !seenSessionPage.has(key)) {
+      seenSessionPage.add(key);
+      pageMap[path].sessions++;
+    }
+    if (ev.type === 'time_on_page' && ev.time_on_page_ms) pageMap[path].times.push(ev.time_on_page_ms);
+    if (ev.type === 'scroll_depth' && ev.depth_pct) pageMap[path].depths.push(ev.depth_pct);
+  });
+
+  const totalSessions = sessionIds.length;
+
+  return Object.values(pageMap)
+    .map(p => ({
+      path: p.path,
+      sessions: p.sessions,
+      pct: totalSessions > 0 ? (p.sessions / totalSessions * 100) : 0,
+      avgTimeMs: p.times.length > 0 ? Math.round(p.times.reduce((a, b) => a + b, 0) / p.times.length) : null,
+      avgDepth:  p.depths.length > 0 ? Math.round(p.depths.reduce((a, b) => a + b, 0) / p.depths.length) : null,
+    }))
+    .sort((a, b) => b.sessions - a.sessions)
+    .slice(0, 30);
+}
+
+// Full session path for a single conversion event — used in the event drilldown modal
+export async function getSessionPath(clientId, sessionId) {
+  const { data: events } = await supabase
+    .from('events')
+    .select('type, url, ts, time_on_page_ms, depth_pct')
+    .eq('client_id', clientId)
+    .eq('session_id', sessionId)
+    .in('type', ['pageview', 'time_on_page', 'scroll_depth'])
+    .order('ts', { ascending: true });
+  if (!events) return [];
+
+  // Build ordered page list with time and depth merged in
+  const pages = {};
+  const order = [];
+  events.forEach(ev => {
+    const path = ev.url.replace(/^https?:\/\/[^/]+/, '').replace(/\?.*/, '') || '/';
+    if (ev.type === 'pageview') {
+      if (!pages[path]) { pages[path] = { path, ts: ev.ts, timeMs: null, maxDepth: null }; order.push(path); }
+    }
+    if (ev.type === 'time_on_page' && ev.time_on_page_ms && pages[path]) pages[path].timeMs = ev.time_on_page_ms;
+    if (ev.type === 'scroll_depth' && ev.depth_pct && pages[path]) pages[path].maxDepth = Math.max(pages[path].maxDepth || 0, ev.depth_pct);
+  });
+
+  return order.map(p => pages[p]);
 }
 
 export async function getFormAnalytics(clientId, days = 30) {

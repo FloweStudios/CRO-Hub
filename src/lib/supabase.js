@@ -139,6 +139,23 @@ export async function toggleGoal(id, active) {
   return { data, error };
 }
 
+export async function updateGoal(id, { name, type, cssSelector, urlPattern, matchType, active }) {
+  const { data, error } = await supabase
+    .from('conversion_goals')
+    .update({
+      name,
+      type,
+      css_selector: cssSelector ?? null,
+      url_pattern:  urlPattern  ?? null,
+      match_type:   matchType   ?? 'exact',
+      active,
+    })
+    .eq('id', id)
+    .select()
+    .single();
+  return { data, error };
+}
+
 export async function deleteGoal(id) {
   const { error } = await supabase.from('conversion_goals').delete().eq('id', id);
   return { error };
@@ -181,5 +198,3 @@ export async function deleteConversionEvent(id) {
   }
   return { success: true };
 }
-
-
