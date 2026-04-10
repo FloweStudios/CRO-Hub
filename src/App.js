@@ -276,10 +276,51 @@ function CreatePartnerModal({ onClose, onCreated }) {
 
 // ─── Partner shell (routes to subpages) ──────────────────────────────────────
 
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+function daysAgoStr(n) { return new Date(Date.now() - n * 86400000).toISOString().slice(0, 10); }
+
 function PartnerShell({ partner, page, onBack, onDeleted }) {
-  const [days, setDays] = useState(30);
+  const noFilter = ['snippet', 'settings', 'goals', 'forms'].includes(page);
+
+  // Main date range — default last 30 days
+  const [dateFrom, setDateFrom] = useState(daysAgoStr(30));
+  const [dateTo,   setDateTo]   = useState(todayStr());
+
+  // Comparison range
+  const [compFrom, setCompFrom] = useState('');
+  const [compTo,   setCompTo]   = useState('');
+  const [showComp, setShowComp] = useState(false);
+
+  // Source / medium multiselect
+  const [availSources, setAvailSources] = useState([]);
+  const [selSources,   setSelSources]   = useState([]);
+  const [selMediums,   setSelMediums]   = useState([]);
+  const [showSrcPicker, setShowSrcPicker] = useState(false);
+
+  // Load available sources for this partner so we can populate the picker
+  useEffect(() => {
+    if (noFilter) return;
+    getSources(partner.id, { dateFrom, dateTo }).then(rows => {
+      setAvailSources(rows);
+    });
+  }, [partner.id, dateFrom, dateTo, noFilter]); // eslint-disable-line
+
+  const filter = { dateFrom, dateTo, compFrom: showComp ? compFrom : '', compTo: showComp ? compTo : '', sources: selSources, mediums: selMediums };
+
   const pages = { overview: OverviewPage, goals: GoalsPage, pages: TopPagesPage, sources: SourcesPage, paths: PathsPage, forms: FormsPage, latency: LatencyPage, snippet: SnippetPage, settings: SettingsPage };
   const Page = pages[page] || OverviewPage;
+
+  const activeSourceFilters = selSources.length + selMediums.length;
+
+  function toggleSource(src) {
+    setSelSources(prev => prev.includes(src) ? prev.filter(s => s !== src) : [...prev, src]);
+  }
+  function toggleMedium(med) {
+    setSelMediums(prev => prev.includes(med) ? prev.filter(m => m !== med) : [...prev, med]);
+  }
+
+  const allMediums = [...new Set(availSources.map(s => s.medium))];
+
   return (
     <div className="page">
       <div className="detail-header">
@@ -292,23 +333,93 @@ function PartnerShell({ partner, page, onBack, onDeleted }) {
             <h2 className="page-title">{partner.name}</h2>
             <a className="card-domain link" href={`https://${partner.domain}`} target="_blank" rel="noreferrer">{partner.domain} ↗</a>
           </div>
-          {!['snippet', 'settings', 'goals'].includes(page) && (
-            <div className="date-filter">
-              {[7, 30, 90].map(d => (
-                <button key={d} className={`date-btn ${days === d ? 'active' : ''}`} onClick={() => setDays(d)}>{d}d</button>
-              ))}
-            </div>
-          )}
         </div>
       </div>
-      <Page partner={partner} days={days} onDeleted={onDeleted} />
+
+      {!noFilter && (
+        <div className="global-filter-bar">
+          {/* Date range */}
+          <div className="gf-group">
+            <span className="gf-label">Range</span>
+            <input type="date" className="gf-date-input" value={dateFrom} max={dateTo} onChange={e => setDateFrom(e.target.value)} />
+            <span className="gf-sep">→</span>
+            <input type="date" className="gf-date-input" value={dateTo} min={dateFrom} max={todayStr()} onChange={e => setDateTo(e.target.value)} />
+          </div>
+
+          {/* Comparison toggle */}
+          <div className="gf-group">
+            <button className={`gf-toggle ${showComp ? 'active' : ''}`} onClick={() => {
+              setShowComp(v => !v);
+              if (!showComp && !compFrom) {
+                // Default comparison to the equivalent prior period
+                const ms = new Date(dateTo) - new Date(dateFrom);
+                const days = Math.ceil(ms / 86400000) + 1;
+                setCompTo(daysAgoStr(days + 1));
+                setCompFrom(daysAgoStr(days * 2 + 1));
+              }
+            }}>
+              Compare
+            </button>
+            {showComp && (
+              <>
+                <input type="date" className="gf-date-input" value={compFrom} onChange={e => setCompFrom(e.target.value)} />
+                <span className="gf-sep">→</span>
+                <input type="date" className="gf-date-input" value={compTo} onChange={e => setCompTo(e.target.value)} />
+              </>
+            )}
+          </div>
+
+          {/* Source / medium picker */}
+          <div className="gf-group" style={{ position: 'relative' }}>
+            <button className={`gf-toggle ${activeSourceFilters > 0 ? 'active' : ''}`} onClick={() => setShowSrcPicker(v => !v)}>
+              Source {activeSourceFilters > 0 ? `(${activeSourceFilters})` : ''}
+            </button>
+            {showSrcPicker && (
+              <div className="src-picker" onClick={e => e.stopPropagation()}>
+                <div className="src-picker-section">
+                  <div className="src-picker-label">Source</div>
+                  {availSources.map(s => (
+                    <label key={s.source} className="src-picker-row">
+                      <input type="checkbox" checked={selSources.includes(s.source)} onChange={() => toggleSource(s.source)} />
+                      <span>{s.source}</span>
+                      <span className="src-picker-count">{s.sessions}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="src-picker-section">
+                  <div className="src-picker-label">Medium</div>
+                  {allMediums.map(m => (
+                    <label key={m} className="src-picker-row">
+                      <input type="checkbox" checked={selMediums.includes(m)} onChange={() => toggleMedium(m)} />
+                      <span className={`medium-pill medium-${m}`}>{m}</span>
+                    </label>
+                  ))}
+                </div>
+                {activeSourceFilters > 0 && (
+                  <button className="src-picker-clear" onClick={() => { setSelSources([]); setSelMediums([]); }}>Clear filters</button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Active filter summary chips */}
+          {selSources.map(s => (
+            <span key={s} className="gf-chip">{s} <button onClick={() => toggleSource(s)}>✕</button></span>
+          ))}
+          {selMediums.map(m => (
+            <span key={m} className="gf-chip">{m} <button onClick={() => toggleMedium(m)}>✕</button></span>
+          ))}
+        </div>
+      )}
+
+      <Page partner={partner} filter={filter} onDeleted={onDeleted} />
     </div>
   );
 }
 
 // ─── Overview page ────────────────────────────────────────────────────────────
 
-function OverviewPage({ partner, days }) {
+function OverviewPage({ partner, filter }) {
   const [data, setData] = useState(null);
   const [series, setSeries] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -316,14 +427,14 @@ function OverviewPage({ partner, days }) {
   useEffect(() => {
     setLoading(true);
     Promise.all([
-      getOverview(partner.id, days),
-      getDailySeries(partner.id, days),
+      getOverview(partner.id, filter),
+      getDailySeries(partner.id, filter),
     ]).then(([overview, daily]) => {
       setData(overview);
       setSeries(daily);
       setLoading(false);
     });
-  }, [partner.id, days]);
+  }, [partner.id, JSON.stringify(filter)]); // eslint-disable-line
 
   if (loading) return <div className="loading-state"><div className="spinner lg" /></div>;
   if (!data) return null;
@@ -345,7 +456,7 @@ function OverviewPage({ partner, days }) {
             <span className="legend-dot conversions" />Conversions
           </div>
         </div>
-        <Sparkline data={series} days={days} />
+        <Sparkline data={series} />
       </div>
 
       <div className="two-col">
@@ -387,7 +498,7 @@ function OverviewPage({ partner, days }) {
 
 // REPLACE the entire GoalsPage function in App.js with this.
 
-function GoalsPage({ partner, days }) {
+function GoalsPage({ partner, filter }) {
   const [goals, setGoals]             = useState([]);
   const [events, setEvents]           = useState([]);
   const [loading, setLoading]         = useState(true);
@@ -405,10 +516,11 @@ function GoalsPage({ partner, days }) {
 
   const loadEvents = useCallback(async () => {
     setEventsLoading(true);
-    const { data } = await getConversionEvents(partner.id, days);
-    setEvents(data || []);
+    const since = filter?.dateFrom ? new Date(filter.dateFrom).toISOString() : new Date(Date.now() - 30 * 86400000).toISOString();
+    const { data } = await getConversionEvents(partner.id, 365); // fetch wide, filter client-side via date range
+    setEvents((data || []).filter(e => !filter?.dateFrom || e.ts >= since));
     setEventsLoading(false);
-  }, [partner.id, days]);
+  }, [partner.id, JSON.stringify(filter)]); // eslint-disable-line
 
   useEffect(() => { loadGoals(); }, [loadGoals]);
   useEffect(() => { if (tab === 'events') loadEvents(); }, [tab, loadEvents]);
@@ -772,20 +884,47 @@ function AddGoalModal({ clientId, onClose, onCreated }) {
 
 // ─── Top pages ────────────────────────────────────────────────────────────────
 
-function TopPagesPage({ partner, days }) {
+function TopPagesPage({ partner, filter }) {
   const [pages, setPages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [device, setDevice] = useState(null);
+  const [sortCol, setSortCol] = useState('pageviews');
+  const [sortDir, setSortDir] = useState('desc');
 
   useEffect(() => {
     setLoading(true);
-    getTopPages(partner.id, days, device).then(data => { setPages(data); setLoading(false); });
-  }, [partner.id, days, device]);
+    getTopPages(partner.id, filter, device).then(data => { setPages(data); setLoading(false); });
+  }, [partner.id, JSON.stringify(filter), device]); // eslint-disable-line
+
+  function handleSort(col) {
+    if (sortCol === col) { setSortDir(d => d === 'desc' ? 'asc' : 'desc'); }
+    else { setSortCol(col); setSortDir('desc'); }
+  }
+
+  const sorted = useMemo(() => {
+    return [...pages].sort((a, b) => {
+      const av = a[sortCol] ?? -1;
+      const bv = b[sortCol] ?? -1;
+      const av2 = typeof av === 'string' ? parseFloat(av) : av;
+      const bv2 = typeof bv === 'string' ? parseFloat(bv) : bv;
+      return sortDir === 'desc' ? bv2 - av2 : av2 - bv2;
+    });
+  }, [pages, sortCol, sortDir]);
+
+  function SortTh({ col, children, className }) {
+    const active = sortCol === col;
+    return (
+      <span className={`${className} sort-th ${active ? 'sort-active' : ''}`} onClick={() => handleSort(col)}>
+        {children}
+        <span className="sort-arrow">{active ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ' ↕'}</span>
+      </span>
+    );
+  }
 
   return (
     <div>
       <div className="section-header">
-        <div><h3 className="section-title">Top pages</h3><p className="section-sub">Ranked by pageviews</p></div>
+        <div><h3 className="section-title">Top pages</h3><p className="section-sub">Click a column header to sort</p></div>
         <div className="filter-group">
           {[null, 'mobile', 'tablet', 'desktop'].map(d => (
             <button key={d || 'all'} className={`filter-btn ${device === d ? 'active' : ''}`} onClick={() => setDevice(d)}>
@@ -798,19 +937,21 @@ function TopPagesPage({ partner, days }) {
         <div className="data-table">
           <div className="table-head">
             <span className="col-url">Page</span>
-            <span className="col-num">Pageviews</span>
-            <span className="col-num">Sessions</span>
-            <span className="col-num">Avg time</span>
-            <span className="col-num">Conv rate</span>
+            <SortTh col="pageviews" className="col-num">Pageviews</SortTh>
+            <SortTh col="sessions"  className="col-num">Sessions</SortTh>
+            <SortTh col="avgTime"   className="col-num">Avg time</SortTh>
+            <SortTh col="convRate"  className="col-num">Conv rate</SortTh>
+            <SortTh col="conversions" className="col-num">Convs</SortTh>
           </div>
-          {pages.length === 0 ? <div className="table-empty">No data for this period</div>
-            : pages.map((p, i) => (
+          {sorted.length === 0 ? <div className="table-empty">No data for this period</div>
+            : sorted.map((p, i) => (
               <div key={i} className="table-row">
                 <span className="col-url mono-sm">{p.url.replace(/^https?:\/\/[^/]+/, '') || '/'}</span>
                 <span className="col-num">{fmt(p.pageviews)}</span>
                 <span className="col-num">{fmt(p.sessions)}</span>
                 <span className="col-num">{p.avgTime != null ? fmtTime(p.avgTime) : '—'}</span>
                 <span className="col-num">{p.convRate}%</span>
+                <span className="col-num">{fmt(p.conversions)}</span>
               </div>
             ))}
         </div>
@@ -821,33 +962,58 @@ function TopPagesPage({ partner, days }) {
 
 // ─── Sources page ─────────────────────────────────────────────────────────────
 
-function SourcesPage({ partner, days }) {
+function SourcesPage({ partner, filter }) {
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [sortCol, setSortCol] = useState('sessions');
+  const [sortDir, setSortDir] = useState('desc');
 
   useEffect(() => {
     setLoading(true);
-    getSources(partner.id, days).then(data => { setSources(data); setLoading(false); });
-  }, [partner.id, days]);
+    getSources(partner.id, filter).then(data => { setSources(data); setLoading(false); });
+  }, [partner.id, JSON.stringify(filter)]); // eslint-disable-line
 
-  const maxSessions = useMemo(() => Math.max(...sources.map(s => s.sessions), 1), [sources]);
+  function handleSort(col) {
+    if (sortCol === col) { setSortDir(d => d === 'desc' ? 'asc' : 'desc'); }
+    else { setSortCol(col); setSortDir('desc'); }
+  }
+
+  const sorted = useMemo(() => {
+    return [...sources].sort((a, b) => {
+      const av = typeof a[sortCol] === 'string' ? parseFloat(a[sortCol]) : (a[sortCol] ?? 0);
+      const bv = typeof b[sortCol] === 'string' ? parseFloat(b[sortCol]) : (b[sortCol] ?? 0);
+      return sortDir === 'desc' ? bv - av : av - bv;
+    });
+  }, [sources, sortCol, sortDir]);
+
+  const maxSessions = useMemo(() => Math.max(...sorted.map(s => s.sessions), 1), [sorted]);
+
+  function SortTh({ col, children, className }) {
+    const active = sortCol === col;
+    return (
+      <span className={`${className} sort-th ${active ? 'sort-active' : ''}`} onClick={() => handleSort(col)}>
+        {children}
+        <span className="sort-arrow">{active ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ' ↕'}</span>
+      </span>
+    );
+  }
 
   return (
     <div>
       <div className="section-header">
-        <div><h3 className="section-title">Traffic sources</h3><p className="section-sub">Where your sessions come from</p></div>
+        <div><h3 className="section-title">Traffic sources</h3><p className="section-sub">Click a column header to sort</p></div>
       </div>
       {loading ? <div className="loading-state"><div className="spinner lg" /></div> : (
         <div className="data-table">
           <div className="table-head">
-            <span className="col-source">Source</span>
-            <span className="col-medium">Medium</span>
-            <span className="col-bar">Sessions</span>
-            <span className="col-num">Conversions</span>
-            <span className="col-num">Conv rate</span>
+            <SortTh col="source"      className="col-source">Source</SortTh>
+            <SortTh col="medium"      className="col-medium">Medium</SortTh>
+            <SortTh col="sessions"    className="col-bar">Sessions</SortTh>
+            <SortTh col="conversions" className="col-num">Convs</SortTh>
+            <SortTh col="convRate"    className="col-num">Conv rate</SortTh>
           </div>
-          {sources.length === 0 ? <div className="table-empty">No data for this period</div>
-            : sources.map((s, i) => (
+          {sorted.length === 0 ? <div className="table-empty">No data for this period</div>
+            : sorted.map((s, i) => (
               <div key={i} className="table-row">
                 <span className="col-source">{s.source}</span>
                 <span className="col-medium"><span className={`medium-pill medium-${s.medium}`}>{s.medium}</span></span>
@@ -869,14 +1035,14 @@ function SourcesPage({ partner, days }) {
 
 // ─── Conversion paths ─────────────────────────────────────────────────────────
 
-function PathsPage({ partner, days }) {
+function PathsPage({ partner, filter }) {
   const [paths, setPaths] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    getConversionPaths(partner.id, days).then(data => { setPaths(data); setLoading(false); });
-  }, [partner.id, days]);
+    getConversionPaths(partner.id, filter).then(data => { setPaths(data); setLoading(false); });
+  }, [partner.id, JSON.stringify(filter)]); // eslint-disable-line
 
   const maxCount = useMemo(() => Math.max(...paths.map(p => p.count), 1), [paths]);
 
@@ -913,14 +1079,14 @@ function PathsPage({ partner, days }) {
 
 // ─── Return latency ───────────────────────────────────────────────────────────
 
-function LatencyPage({ partner, days }) {
+function LatencyPage({ partner, filter }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    getVisitorLatency(partner.id, days).then(d => { setData(d); setLoading(false); });
-  }, [partner.id, days]);
+    getVisitorLatency(partner.id).then(d => { setData(d); setLoading(false); });
+  }, [partner.id]);
 
   if (loading) return <div className="loading-state"><div className="spinner lg" /></div>;
   if (!data) return null;
