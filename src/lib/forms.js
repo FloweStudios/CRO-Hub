@@ -39,7 +39,12 @@ export async function getFormVersions(formId) {
 // ── Form funnel ───────────────────────────────────────────────────────────────
 
 export async function getFormFunnel(formVersionId) {
-  const [fieldsRes, summaryRes] = await Promise.all([
+  const [versionRes, fieldsRes, summaryRes] = await Promise.all([
+    supabase
+      .from('form_versions')
+      .select('fields')
+      .eq('id', formVersionId)
+      .single(),
     supabase
       .from('form_field_stats')
       .select('*')
@@ -51,8 +56,33 @@ export async function getFormFunnel(formVersionId) {
       .eq('form_version_id', formVersionId)
       .single(),
   ]);
-  const fields  = fieldsRes.data  || [];
+
   const summary = summaryRes.data || { sessions_started: 0, sessions_submitted: 0, sessions_abandoned: 0 };
+  const statsRows = fieldsRes.data || [];
+  const canonicalFields = versionRes.data?.fields || [];
+
+  // Build a lookup of stats by field name
+  const statsMap = {};
+  statsRows.forEach(r => { statsMap[r.field_name] = r; });
+
+  // If we have canonical fields from the version snapshot, use them as the
+  // authoritative ordered list and merge stats in. This ensures ALL fields
+  // appear in the funnel even if nobody has touched them yet.
+  let fields;
+  if (canonicalFields.length > 0) {
+    fields = canonicalFields.map(f => ({
+      field_name:       f.name || f.field_name || '',
+      field_type:       f.type || f.field_type || '',
+      field_index:      f.field_index ?? f.index ?? null,
+      required:         f.required ?? false,
+      sessions_touched: statsMap[f.name || f.field_name]?.sessions_touched ?? 0,
+      avg_fill_seconds: statsMap[f.name || f.field_name]?.avg_fill_seconds ?? null,
+    }));
+  } else {
+    // Fallback to stats rows if no version snapshot available
+    fields = statsRows.map(r => ({ ...r, required: false }));
+  }
+
   return { fields, summary };
 }
 
@@ -97,71 +127,67 @@ export async function getFieldTransitionTimes(formVersionId) {
 // ── Form sessions ─────────────────────────────────────────────────────────────
 
 export async function getFormSessions(formVersionId, limit = 100) {
-  // Get all sessions that interacted with this form version
+  // Get all events for this form version — include type and field_name for counting
   const { data: fieldEvents } = await supabase
     .from('events')
-    .select('session_id, ts, url')
+    .select('session_id, type, field_name, ts, url')
     .eq('form_version_id', formVersionId)
     .in('type', ['form_field', 'form_submit'])
     .order('ts', { ascending: false });
 
   if (!fieldEvents || fieldEvents.length === 0) return [];
 
-  // Get unique sessions with metadata
+  // Get unique sessions
   const sessionIds = [...new Set(fieldEvents.map(e => e.session_id))].slice(0, limit);
 
+  // Get session metadata (includes country + device_type from sessions table)
   const { data: sessions } = await supabase
     .from('sessions')
     .select('session_id, visitor_id, device_type, utm_source, utm_medium, country, created_at, converted')
     .in('session_id', sessionIds);
 
-  // Get submit events to know which sessions completed
-  const { data: submits } = await supabase
-    .from('events')
-    .select('session_id')
-    .eq('form_version_id', formVersionId)
-    .eq('type', 'form_submit')
-    .in('session_id', sessionIds);
-
-  const submitSet = new Set((submits || []).map(s => s.session_id));
-
-  // Get field counts per session
-  const fieldCounts = {};
-  fieldEvents.forEach(ev => {
-    if (ev.type === 'form_field') {
-      fieldCounts[ev.session_id] = (fieldCounts[ev.session_id] || 0) + 1;
-    }
-  });
-
-  // Get first URL per session
+  // Determine submitted sessions and count unique fields filled per session
+  const submitSet = new Set();
+  const fieldSets = {}; // session_id -> Set of unique field_names touched
   const sessionUrls = {};
+
   fieldEvents.forEach(ev => {
     if (!sessionUrls[ev.session_id]) sessionUrls[ev.session_id] = ev.url;
+    if (ev.type === 'form_submit') {
+      submitSet.add(ev.session_id);
+    }
+    if (ev.type === 'form_field' && ev.field_name) {
+      if (!fieldSets[ev.session_id]) fieldSets[ev.session_id] = new Set();
+      fieldSets[ev.session_id].add(ev.field_name);
+    }
   });
 
   return sessionIds.map(sid => {
     const session = (sessions || []).find(s => s.session_id === sid) || {};
     return {
-      session_id:   sid,
-      visitor_id:   session.visitor_id,
-      device_type:  session.device_type,
-      utm_source:   session.utm_source,
-      country:      session.country,
-      created_at:   session.created_at,
-      url:          sessionUrls[sid],
-      fields_filled: fieldCounts[sid] || 0,
-      submitted:    submitSet.has(sid),
-      status:       submitSet.has(sid) ? 'submitted' : 'abandoned',
+      session_id:    sid,
+      visitor_id:    session.visitor_id,
+      device_type:   session.device_type,
+      utm_source:    session.utm_source,
+      country:       session.country,
+      created_at:    session.created_at,
+      url:           sessionUrls[sid],
+      fields_filled: fieldSets[sid]?.size ?? 0,
+      submitted:     submitSet.has(sid),
+      status:        submitSet.has(sid) ? 'submitted' : 'abandoned',
     };
   });
 }
 
-export async function deleteFormSession(sessionId) {
-  // Delete all events for this session related to this form
+export async function deleteFormSession(formVersionId, sessionId) {
+  // Delete all form-related events for this session.
+  // We scope to form_version_id so we only delete events tied to this
+  // specific form — the session may have other unrelated events we must keep.
   const { error } = await supabase
     .from('events')
     .delete()
     .eq('session_id', sessionId)
+    .eq('form_version_id', formVersionId)
     .in('type', ['form_field', 'form_submit', 'form_scan']);
 
   if (error) throw error;

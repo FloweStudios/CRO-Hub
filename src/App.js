@@ -82,16 +82,33 @@ function Login() {
 function Dashboard({ session }) {
   const [partners, setPartners] = useState([]);
   const [loadingPartners, setLoadingPartners] = useState(true);
-  const [view, setView] = useState('partners');
-  const [activePartner, setActivePartner] = useState(null);
-  const [activePage, setActivePage] = useState('overview');
+
+  // Rehydrate from sessionStorage so refresh doesn't kick back to partners list
+  const [view, setView] = useState(() => sessionStorage.getItem('crohub_view') || 'partners');
+  const [activePartner, setActivePartner] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem('crohub_partner') || 'null'); } catch { return null; }
+  });
+  const [activePage, setActivePage] = useState(() => sessionStorage.getItem('crohub_page') || 'overview');
   const [showCreate, setShowCreate] = useState(false);
+
+  // Keep sessionStorage in sync
+  useEffect(() => { sessionStorage.setItem('crohub_view', view); }, [view]);
+  useEffect(() => { sessionStorage.setItem('crohub_page', activePage); }, [activePage]);
+  useEffect(() => { sessionStorage.setItem('crohub_partner', JSON.stringify(activePartner)); }, [activePartner]);
 
   const loadPartners = useCallback(async () => {
     setLoadingPartners(true);
     const { data } = await getPartners();
-    setPartners(data || []);
+    const fetched = data || [];
+    setPartners(fetched);
     setLoadingPartners(false);
+
+    // If we restored an activePartner from sessionStorage, refresh it from
+    // the freshly-loaded list so we always have up-to-date partner data.
+    setActivePartner(prev => {
+      if (!prev) return null;
+      return fetched.find(p => p.id === prev.id) || prev;
+    });
   }, []);
 
   useEffect(() => { loadPartners(); }, [loadPartners]);

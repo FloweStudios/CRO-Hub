@@ -252,7 +252,7 @@ function SessionsTab({ formVersionId }) {
   async function handleDelete() {
     if (!confirmDelete) return;
     try {
-      await deleteFormSession(confirmDelete);
+      await deleteFormSession(formVersionId, confirmDelete);
       await loadSessions();
     } catch (err) {
       alert('Delete failed: ' + err.message);
@@ -585,6 +585,7 @@ function FormFunnel({ funnel, transitions, version }) {
                 <FunnelStep
                   label={field.field_name || `Field ${i + 1}`}
                   sublabel={field.field_type}
+                  required={field.required}
                   count={touched} maxCount={maxTouched} pct={pct}
                   avgTime={field.avg_fill_seconds}
                   fillColor={pct < 50 ? 'var(--red)' : pct < 75 ? 'var(--amber)' : 'var(--accent-1)'}
@@ -628,12 +629,17 @@ function FormFunnel({ funnel, transitions, version }) {
   );
 }
 
-function FunnelStep({ label, sublabel, count, maxCount, pct, avgTime, fillColor, isEntry, isExit }) {
+function FunnelStep({ label, sublabel, required, count, maxCount, pct, avgTime, fillColor, isEntry, isExit }) {
   const barWidth = maxCount > 0 ? (count / maxCount * 100) : 0;
   return (
     <div className={`funnel-step ${isEntry ? 'step-entry' : ''} ${isExit ? 'step-exit' : ''}`}>
       <div className="funnel-step-label">
         <span className="funnel-field-name">{label}</span>
+        {!isEntry && !isExit && (
+          required
+            ? <span className="field-required-badge">required</span>
+            : <span className="field-optional-badge">optional</span>
+        )}
         {sublabel && <span className="funnel-field-type">{sublabel}</span>}
       </div>
       <div className="funnel-step-bar-wrap">
