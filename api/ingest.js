@@ -219,17 +219,18 @@ export default async function handler(req, res) {
   return res.status(202).send('accepted');
 }
 
-// ── Form version resolution ────────────────────────────────────────────────
-// Uses form_scan events (which contain the full field snapshot) to determine
-// if a new version needs to be created. This is more reliable than inferring
-// structure from form_field events.
-
 async function resolveFormVersionsFromScans(clientId, events) {
   const versionMap = new Map();
 
-  // Only use form_scan events for version detection
-  const scans = events.filter(ev => ev.type === 'form_scan' && ev.form_id && ev.form_fields_snapshot);
-  if (scans.length === 0) return versionMap;
+  // Collect form_ids from BOTH scan events and form_field/submit events
+  const scanEvents  = events.filter(ev => ev.type === 'form_scan' && ev.form_id && ev.form_fields_snapshot);
+  const fieldFormIds = [...new Set(
+    events
+      .filter(ev => (ev.type === 'form_field' || ev.type === 'form_submit') && ev.form_id)
+      .map(ev => ev.form_id)
+  )];
+
+  if (scanEvents.length === 0 && fieldFormIds.length === 0) return versionMap;
 
   // Fetch all form definitions for this client
   const { data: definitions } = await supabase
@@ -240,8 +241,7 @@ async function resolveFormVersionsFromScans(clientId, events) {
   if (!definitions || definitions.length === 0) return versionMap;
 
   function normalise(sel) {
-    return (sel || '').replace(/^#/, '').replace(/^form#/, '').replace(/^form\./,'')
-      .replace(/^\[id=['"]?/, '').replace(/^\[name=['"]?/, '').replace(/['"\]]/g, '')
+    return (sel || '').replace(/^#/, '').replace(/^form#/, '').replace(/^\./, '')
       .toLowerCase().trim();
   }
 
@@ -251,14 +251,19 @@ async function resolveFormVersionsFromScans(clientId, events) {
     defMap.set(normalise(d.selector), d.id);
   });
 
-  for (const scan of scans) {
-    const formId = scan.form_id;
-    const definitionId = defMap.get(formId) || defMap.get('#' + formId) || defMap.get(normalise(formId));
+  function findDefId(formId) {
+    return defMap.get(formId)
+      || defMap.get('#' + formId)
+      || defMap.get(normalise(formId));
+  }
+
+  // ── Step 1: Process scan events — create/update versions ─────────────────
+  for (const scan of scanEvents) {
+    const definitionId = findDefId(scan.form_id);
     if (!definitionId) continue;
 
-    // Fingerprint based on ordered field names from the scan snapshot
     const fields = Array.isArray(scan.form_fields_snapshot) ? scan.form_fields_snapshot : [];
-    const orderedNames = fields.sort((a, b) => (a.index ?? 999) - (b.index ?? 999)).map(f => f.name || '').join('|');
+    const orderedNames = [...fields].sort((a, b) => (a.index ?? 999) - (b.index ?? 999)).map(f => f.name || '').join('|');
     const fingerprint = simpleHash(orderedNames);
 
     const { data: currentVersion } = await supabase
@@ -269,7 +274,7 @@ async function resolveFormVersionsFromScans(clientId, events) {
       .maybeSingle();
 
     if (currentVersion && currentVersion.fingerprint === fingerprint) {
-      versionMap.set(formId, currentVersion.id);
+      versionMap.set(scan.form_id, currentVersion.id);
       supabase.from('form_versions').update({ last_seen: new Date().toISOString() }).eq('id', currentVersion.id).then(() => {});
     } else {
       if (currentVersion) {
@@ -280,13 +285,36 @@ async function resolveFormVersionsFromScans(clientId, events) {
         .from('form_versions')
         .insert({ form_id: definitionId, client_id: clientId, version_number: nextNumber, fingerprint, fields, is_current: true })
         .select('id').single();
+      if (newVersion) versionMap.set(scan.form_id, newVersion.id);
+    }
+  }
 
-      if (newVersion) versionMap.set(formId, newVersion.id);
+  // ── Step 2: For form_field/submit events not covered by a scan in this
+  //    batch, look up the existing current version directly from the DB.
+  //    This handles the common case where scan fired in a previous flush
+  //    and field events arrive in a later batch with no scan present.
+
+  const uncoveredFormIds = fieldFormIds.filter(id => !versionMap.has(id));
+
+  for (const formId of uncoveredFormIds) {
+    const definitionId = findDefId(formId);
+    if (!definitionId) continue;
+
+    const { data: currentVersion } = await supabase
+      .from('form_versions')
+      .select('id')
+      .eq('form_id', definitionId)
+      .eq('is_current', true)
+      .maybeSingle();
+
+    if (currentVersion) {
+      versionMap.set(formId, currentVersion.id);
     }
   }
 
   return versionMap;
 }
+
 
 function simpleHash(str) {
   let h = 0;
