@@ -879,14 +879,12 @@ select.field-input { cursor: pointer; }
 .dist-bar { height: 100%; background: var(--accent-1); border-radius: 3px; opacity: 0.7; transition: width 0.4s; }
 .dist-count { font-family: var(--mono); font-size: 0.82rem; color: var(--text2); width: 32px; text-align: right; flex-shrink: 0; }
 
-/* â”€â”€ Goal hint box â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .goal-hint-box {
   background: var(--accent-dim); border: 1px solid var(--border-accent);
   border-radius: var(--radius); padding: 11px 14px;
   font-size: 0.85rem; color: var(--tint-3); line-height: 1.6; margin-bottom: 20px;
 }
 
-/* â”€â”€ Form analytics page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .form-card { background: var(--blue-4); border: 1px solid var(--border); border-radius: var(--radius-lg); margin-bottom: 16px; overflow: hidden; }
 .form-card-header { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .form-id { color: var(--text3); font-family: var(--mono); font-size: 0.78rem; }
@@ -898,5 +896,38 @@ select.field-input { cursor: pointer; }
 .field-row:hover { background: rgba(255,255,255,0.03); }
 .field-type-tag { font-size: 0.7rem; background: rgba(255,255,255,0.07); color: var(--text3); padding: 2px 7px; border-radius: 4px; display: inline-block; border: 1px solid var(--border); }
 
-/* â”€â”€ Misc helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .mono-sm { font-family: var(--mono); font-size: 0.78rem; color: var(--text2); }
+
+/* Form sessions table */
+.form-sessions-head {
+  display: grid;
+  grid-template-columns: 120px 100px 95px 100px 80px 110px 40px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.68rem; font-weight: 600; color: var(--text3);
+  text-transform: uppercase; letter-spacing: 0.07em;
+}
+.form-sessions-row {
+  display: grid;
+  grid-template-columns: 120px 100px 95px 100px 80px 110px 40px;
+  padding: 11px 18px;
+  border-top: 1px solid var(--border);
+  align-items: center;
+  transition: background 0.1s;
+}
+.form-sessions-row:hover { background: rgba(255,255,255,0.03); }
+
+/* Status pills */
+.status-pill {
+  display: inline-block;
+  font-size: 0.72rem; font-weight: 600;
+  padding: 3px 9px; border-radius: 20px;
+}
+.status-pill.submitted {
+  background: var(--green-dim); color: var(--green);
+  border: 1px solid rgba(46,204,113,0.3);
+}
+.status-pill.abandoned {
+  background: var(--red-dim); color: #ff8a80;
+  border: 1px solid rgba(231,76,60,0.3);
+}

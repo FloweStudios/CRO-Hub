@@ -23,26 +23,20 @@ export default async function handler(req, res) {
     return res.status(200).send('/* crohub: unknown client */');
   }
 
-  const { data: goals } = await supabase
-    .from('conversion_goals')
-    .select('id, type, url_pattern, css_selector, match_type')
-    .eq('client_id', client.id)
-    .eq('active', true);
-
-  // Fetch registered form definitions so tracker knows which selectors to watch
-  const { data: formDefs } = await supabase
-    .from('form_definitions')
-    .select('id, selector, name')
-    .eq('client_id', client.id)
-    .eq('active', true);
+  const [goalsRes, formDefsRes, submitActionsRes] = await Promise.all([
+    supabase.from('conversion_goals').select('id, type, url_pattern, css_selector, match_type').eq('client_id', client.id).eq('active', true),
+    supabase.from('form_definitions').select('id, selector, name').eq('client_id', client.id).eq('active', true),
+    supabase.from('form_submit_actions').select('id, form_id, type, css_selector, url_pattern, match_type').eq('client_id', client.id).eq('active', true),
+  ]);
 
   const script = buildScript({
-    clientId:  client.id,
-    domain:    client.domain,
-    secretKey: client.secret_key,
-    ingestUrl: `https://${req.headers.host}/api/ingest`,
-    goals:     goals    || [],
-    formDefs:  formDefs || [],
+    clientId:      client.id,
+    domain:        client.domain,
+    secretKey:     client.secret_key,
+    ingestUrl:     `https://${req.headers.host}/api/ingest`,
+    goals:         goalsRes.data         || [],
+    formDefs:      formDefsRes.data      || [],
+    submitActions: submitActionsRes.data || [],
   });
 
   res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
@@ -51,11 +45,12 @@ export default async function handler(req, res) {
   return res.status(200).send(script);
 }
 
-function buildScript({ clientId, domain, secretKey, ingestUrl, goals, formDefs }) {
+function buildScript({ clientId, domain, secretKey, ingestUrl, goals, formDefs, submitActions }) {
   const esc = s => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   const cleanDomain = domain.replace(/^https?:\/\//, '').replace(/\/+$/, '').toLowerCase();
-  const goalsJson   = JSON.stringify(goals.map(g => ({ id: g.id, type: g.type, url: g.url_pattern || null, sel: g.css_selector || null, match: g.match_type || 'exact' })));
-  const formDefsJson = JSON.stringify(formDefs.map(f => ({ id: f.id, sel: f.selector, name: f.name })));
+  const goalsJson        = JSON.stringify(goals.map(g => ({ id: g.id, type: g.type, url: g.url_pattern || null, sel: g.css_selector || null, match: g.match_type || 'exact' })));
+  const formDefsJson     = JSON.stringify(formDefs.map(f => ({ id: f.id, sel: f.selector, name: f.name })));
+  const submitActionsJson = JSON.stringify(submitActions.map(a => ({ id: a.id, formId: a.form_id, type: a.type, sel: a.css_selector || null, url: a.url_pattern || null, match: a.match_type || 'exact' })));
 
   return `!function(){'use strict';
 var _dom='${esc(cleanDomain)}',_h=location.hostname.toLowerCase();
@@ -65,6 +60,7 @@ if(_h!==_dom&&_h.slice(-(_dom.length+1))!=='.'+_dom)return;
 var _cid='${esc(clientId)}',_sec='${esc(secretKey)}',_ing='${esc(ingestUrl)}';
 var _goals=${goalsJson};
 var _formDefs=${formDefsJson};
+var _submitActions=${submitActionsJson};
 var _FLUSH=2000,_QK='__crq_${clientId.replace(/[^a-z0-9]/g,'_')}__',_MAX=200;
 
 function _uuid(){
@@ -187,6 +183,7 @@ function _trackClick(e){
              width:Math.round(r.width),height:Math.round(r.height)}
   }));
   _checkGoals('click',m);
+  _checkSubmitActions('click',m,null);
 }
 
 function _trackScroll(){
@@ -201,42 +198,31 @@ function _trackScroll(){
 }
 
 // ── Form tracking ─────────────────────────────────────────────────────────────
-// For each registered form definition:
-// 1. On DOM ready: scan the container for all inputs → send form_scan event
-// 2. Track focus (start time), blur (fill time per field)
-// 3. Track total form time = first focus to last blur/submit
-// 4. Track submit
 
 function _getFormFields(container){
   var inputs=Array.prototype.slice.call(
     container.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]),select,textarea')
   );
   return inputs.map(function(el,i){
-    // Get best label for this field
     var label='';
-    if(el.id){
-      var lbl=document.querySelector('label[for="'+el.id+'"]');
-      if(lbl)label=lbl.textContent.trim();
-    }
+    if(el.id){var lbl=document.querySelector('label[for="'+el.id+'"]');if(lbl)label=lbl.textContent.trim();}
     if(!label&&el.placeholder)label=el.placeholder;
     if(!label&&el.name)label=el.name;
-    return{
-      name:el.name||el.id||('field_'+i),
-      type:el.type||el.tagName.toLowerCase(),
-      index:i,
-      label:label.slice(0,80),
-      required:el.required||false,
-    };
+    return{name:el.name||el.id||('field_'+i),type:el.type||el.tagName.toLowerCase(),
+      index:i,label:label.slice(0,80),required:el.required||false};
   });
 }
 
 function _normFormId(sel){
-  // Normalise selector to a plain ID string for event form_id field
-  if(sel.charAt(0)==='#')sel=sel.slice(1);
-if(sel.indexOf('form#')===0)sel=sel.slice(5);
-if(sel.charAt(0)==='.')sel=sel.slice(1);
-return sel.trim();
+  var s=sel;
+  if(s.charAt(0)==='#')s=s.slice(1);
+  if(s.indexOf('form#')===0)s=s.slice(5);
+  if(s.charAt(0)==='.')s=s.slice(1);
+  return s.trim();
 }
+
+// Map from formId → formDefId (for submit action lookup)
+var _formIdToDefId={};
 
 function _initFormTracking(){
   if(!_formDefs||!_formDefs.length)return;
@@ -247,59 +233,45 @@ function _initFormTracking(){
     if(!container)return;
 
     var formId=_normFormId(def.sel);
+    _formIdToDefId[formId]=def.id;
+
     var fields=_getFormFields(container);
     if(!fields.length)return;
 
-    // ── 1. Send form_scan — records field inventory for version detection ──
+    // Send form_scan on page load
     _enq(Object.assign(_base('form_scan'),{
       form_id:formId,
       form_fields_snapshot:fields,
     }));
 
-    // Per-field state
     var fieldState={};
     var formStartTime=null;
-    var formLastActivityTime=null;
 
-    fields.forEach(function(f){
-      fieldState[f.name]={focusTime:null,filled:false};
-    });
+    fields.forEach(function(f){fieldState[f.name]={focusTime:null};});
 
-    // ── 2. Focus: record start time ───────────────────────────────────────
     container.addEventListener('focusin',function(e){
       var el=e.target;
       if(!el||!el.tagName)return;
       var tag=el.tagName.toLowerCase();
       if(tag!=='input'&&tag!=='select'&&tag!=='textarea')return;
-      var name=el.name||el.id||'';
-      if(!name)return;
-
+      var name=el.name||el.id||'';if(!name)return;
       var now=Date.now();
       if(!formStartTime)formStartTime=now;
       if(fieldState[name])fieldState[name].focusTime=now;
     });
 
-    // ── 3. Blur: record fill time ─────────────────────────────────────────
     container.addEventListener('focusout',function(e){
       var el=e.target;
       if(!el||!el.tagName)return;
       var tag=el.tagName.toLowerCase();
       if(tag!=='input'&&tag!=='select'&&tag!=='textarea')return;
-      var name=el.name||el.id||'';
-      if(!name)return;
-
+      var name=el.name||el.id||'';if(!name)return;
       var now=Date.now();
-      formLastActivityTime=now;
-
       var fs=fieldState[name];
       var timeMs=fs&&fs.focusTime?now-fs.focusTime:null;
-      var filled=el.value&&el.value.toString().trim().length>0;
-      if(fs)fs.filled=filled;
-
       var fieldDef=fields.filter(function(f){return f.name===name;})[0];
       _enq(Object.assign(_base('form_field'),{
-        form_id:formId,
-        field_name:name,
+        form_id:formId,field_name:name,
         field_type:el.type||tag,
         field_index:fieldDef?fieldDef.index:null,
         time_to_fill_ms:timeMs,
@@ -307,27 +279,23 @@ function _initFormTracking(){
       }));
     });
 
-    // ── 4. Submit: record total time + send form_submit ───────────────────
-    // Watch for both form submit and button clicks inside the container
     function handleSubmit(){
       var totalMs=formStartTime?(Date.now()-formStartTime):null;
       _enq(Object.assign(_base('form_submit'),{
-        form_id:formId,
-        xpath:_xp(container),
-        total_form_time_ms:totalMs,
+        form_id:formId,xpath:_xp(container),total_form_time_ms:totalMs,
       }));
+      // Check if any conversion goal matches form_submit for this form
       _checkGoals('form_submit',container);
     }
 
     // Native form submit
     var formEl=container.tagName.toLowerCase()==='form'
-      ?container
-      :container.querySelector('form');
+      ?container:container.querySelector('form');
     if(formEl){
-      formEl.addEventListener('submit',function(e){handleSubmit();},{passive:true});
+      formEl.addEventListener('submit',function(){handleSubmit();},{passive:true});
     }
 
-    // Also watch submit buttons inside the container (for non-form containers)
+    // Submit button clicks inside container
     container.addEventListener('click',function(e){
       var el=e.target;
       for(var i=0;i<5;i++){
@@ -336,11 +304,95 @@ function _initFormTracking(){
         if((tg==='button'&&(el.type==='submit'||!el.type))||
            (tg==='input'&&el.type==='submit')||
            el.getAttribute('data-submit')){
-          handleSubmit();break;
-        }
+          handleSubmit();break;}
         el=el.parentElement;
       }
     },{passive:true});
+  });
+}
+
+// ── Submit action evaluation ───────────────────────────────────────────────────
+// For each registered submit action, watch for its trigger type and fire
+// a form_submit event when it matches. Conversion is only fired if a
+// matching conversion goal exists (that logic lives in _checkGoals).
+
+var _firedActions={};
+
+function _checkSubmitActions(triggerType,el,url){
+  if(!_submitActions||!_submitActions.length)return;
+  _submitActions.forEach(function(a){
+    if(_firedActions[a.id])return;
+    var match=false;
+
+    if(a.type==='click'&&triggerType==='click'&&a.sel){
+      try{match=el.matches(a.sel);}catch(e){}
+      // Also walk up to find matching ancestor
+      if(!match){var node=el;
+        for(var i=0;i<5;i++){
+          if(!node||node===document.body)break;
+          try{if(node.matches(a.sel)){match=true;break;}}catch(e){}
+          node=node.parentElement;}}
+    }
+
+    if(a.type==='click_url'&&triggerType==='click'){
+      var href=el.href||el.getAttribute('href')||'';
+      var node=el;
+      for(var i=0;i<5;i++){
+        if(!node)break;
+        if(node.tagName&&node.tagName.toLowerCase()==='a'){href=node.href||node.getAttribute('href')||'';break;}
+        node=node.parentElement;
+      }
+      if(href)match=_urlMatch(href,a.url||'',a.match||'contains');
+    }
+
+    if(a.type==='page_load'&&triggerType==='page_load'){
+      match=_urlMatch(location.href,a.url||'',a.match||'exact');
+    }
+
+    if(match){
+      _firedActions[a.id]=true;
+      // Find which form this action belongs to and fire form_submit for it
+      var formId=null;
+      Object.keys(_formIdToDefId).forEach(function(fid){
+        if(_formIdToDefId[fid]===a.formId)formId=fid;
+      });
+      _enq(Object.assign(_base('form_submit'),{
+        form_id:formId,
+        xpath:null,
+        total_form_time_ms:null,
+      }));
+      // Check conversion goals
+      _checkGoals('form_submit',el);
+    }
+  });
+}
+
+// ── Visibility submit actions ─────────────────────────────────────────────────
+
+function _initSubmitActionVisibility(){
+  if(!_submitActions||!window.IntersectionObserver)return;
+  var vg=_submitActions.filter(function(a){return a.type==='element_visible'&&a.sel;});
+  if(!vg.length)return;
+  var obs=new IntersectionObserver(function(entries){
+    entries.forEach(function(entry){
+      if(!entry.isIntersecting)return;
+      var el=entry.target;
+      vg.forEach(function(a){
+        if(_firedActions[a.id])return;
+        try{if(el.matches(a.sel)){
+          _firedActions[a.id]=true;
+          var formId=null;
+          Object.keys(_formIdToDefId).forEach(function(fid){
+            if(_formIdToDefId[fid]===a.formId)formId=fid;
+          });
+          _enq(Object.assign(_base('form_submit'),{form_id:formId,xpath:_xp(el),total_form_time_ms:null}));
+          _checkGoals('form_submit',el);
+        }}catch(e){}
+      });
+    });
+  },{threshold:0.5});
+  vg.forEach(function(a){
+    try{document.querySelectorAll(a.sel).forEach(function(el){obs.observe(el);});}catch(e){}
   });
 }
 
@@ -378,6 +430,15 @@ function _checkGoals(triggerType,el){
     }
     if(g.type==='form_submit'&&triggerType==='form_submit'&&g.sel){
       try{match=el.matches(g.sel);}catch(e){}
+      if(!match&&g.sel){
+        // Also check if any registered form container matches the goal selector
+        var node=el;
+        for(var i=0;i<5;i++){
+          if(!node||node===document.body)break;
+          try{if(node.matches(g.sel)){match=true;break;}}catch(e){}
+          node=node.parentElement;
+        }
+      }
     }
     if(match){_firedGoals[g.id]=true;_enq(Object.assign(_base('conversion'),{goal_id:g.id}));}
   });
@@ -417,14 +478,16 @@ function _checkPageLoadGoals(){
     if(_urlMatch(location.href,g.url||'',g.match)){
       _firedGoals[g.id]=true;_enq(Object.assign(_base('conversion'),{goal_id:g.id}));}
   });
+  // Also check page_load submit actions
+  _checkSubmitActions('page_load',document.body,location.href);
 }
 
 if(document.readyState==='loading'){
   document.addEventListener('DOMContentLoaded',function(){
-    _trackPV();_initFormTracking();_trackVisibility();_checkPageLoadGoals();
+    _trackPV();_initFormTracking();_initSubmitActionVisibility();_trackVisibility();_checkPageLoadGoals();
   });
 }else{
-  _trackPV();_initFormTracking();_trackVisibility();_checkPageLoadGoals();
+  _trackPV();_initFormTracking();_initSubmitActionVisibility();_trackVisibility();_checkPageLoadGoals();
 }
 
 document.addEventListener('click',_trackClick,{passive:true});
