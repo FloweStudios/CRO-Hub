@@ -45,6 +45,16 @@ export async function createPartner({ name, domain }) {
   return { data, error };
 }
 
+export async function updatePartner(id, { name, domain, timezone }) {
+  const { data, error } = await supabase
+    .from('clients')
+    .update({ name, domain, timezone: timezone || null })
+    .eq('id', id)
+    .select()
+    .single();
+  return { data, error };
+}
+
 export async function deletePartner(id) {
   const { error } = await supabase.from('clients').delete().eq('id', id);
   return { error };

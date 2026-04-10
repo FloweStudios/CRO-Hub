@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { supabase, signIn, signOut, onAuthChange, getPartners, createPartner, deletePartner, getGoals, createGoal, updateGoal, deleteGoal } from './lib/supabase';
+import { supabase, signIn, signOut, onAuthChange, getPartners, createPartner, updatePartner, deletePartner, getGoals, createGoal, updateGoal, deleteGoal } from './lib/supabase';
 import { generateSnippet } from './lib/snippet';
 import { getOverview, getDailySeries, getTopPages, getSources, getConversionPaths, getPageInfluence, getSessionPath, getFormAnalytics, getVisitorLatency } from './lib/analytics';
 import './App.css';
@@ -583,7 +583,7 @@ function GoalsPage({ partner, filter }) {
             </div>
             <div className="session-path-meta">
               <span className="ce-goal-name">{sessionPath.ev.conversion_goals?.name || '—'}</span>
-              <span className="mono-sm" style={{ color: 'var(--text3)' }}>{new Date(sessionPath.ev.ts).toLocaleString()}</span>
+              <span className="mono-sm" style={{ color: 'var(--text3)' }}>{fmtInTz(sessionPath.ev.ts, partner.timezone)}</span>
               {sessionPath.ev.utm_source && <span className="medium-pill medium-referral">{sessionPath.ev.utm_source}</span>}
             </div>
             {pathLoading ? <div className="loading-state"><div className="spinner lg" /></div> : (
@@ -688,8 +688,8 @@ function GoalsPage({ partner, filter }) {
                     <span className="ce-col-device"><span className={`device-pill device-${ev.device_type}`}>{ev.device_type || '—'}</span></span>
                     <span className="ce-col-source mono-sm">{ev.utm_source || 'direct'}</span>
                     <span className="ce-col-date">
-                      <span className="ce-date">{new Date(ev.ts).toLocaleDateString()}</span>
-                      <span className="ce-time">{new Date(ev.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span className="ce-date">{fmtDateInTz(ev.ts, partner.timezone)}</span>
+                      <span className="ce-time">{fmtTimeInTz(ev.ts, partner.timezone)}</span>
                     </span>
                     <span className="ce-col-action">
                       <button className="btn-icon-danger" title="Delete event" onClick={e => { e.stopPropagation(); setConfirmDelete({ id: ev.id, type: 'event', label: ev.conversion_goals?.name || ev.url }); }}>✕</button>
@@ -1212,11 +1212,45 @@ function SnippetPage({ partner }) {
 // ─── Settings page ────────────────────────────────────────────────────────────
 
 function SettingsPage({ partner, onDeleted }) {
-  const [showDelete, setShowDelete] = useState(false);
+  const [showDelete, setShowDelete]   = useState(false);
+  const [timezone, setTimezone]       = useState(partner.timezone || 'UTC');
+  const [saving, setSaving]           = useState(false);
+  const [saved, setSaved]             = useState(false);
+  const [saveError, setSaveError]     = useState('');
+  const [currentTime, setCurrentTime] = useState(() => nowInTz(partner.timezone || 'UTC'));
+
+  // Live clock in partner's timezone
+  useEffect(() => {
+    const tz = timezone || 'UTC';
+    setCurrentTime(nowInTz(tz));
+    const interval = setInterval(() => setCurrentTime(nowInTz(tz)), 1000);
+    return () => clearInterval(interval);
+  }, [timezone]);
+
+  async function handleSaveTimezone() {
+    setSaving(true); setSaveError(''); setSaved(false);
+    const { error } = await updatePartner(partner.id, {
+      name: partner.name,
+      domain: partner.domain,
+      timezone,
+    });
+    setSaving(false);
+    if (error) { setSaveError(error.message); }
+    else {
+      setSaved(true);
+      // Patch the in-memory partner object so the rest of the session reflects the change
+      partner.timezone = timezone;
+      setTimeout(() => setSaved(false), 3000);
+    }
+  }
+
   async function handleDelete() {
     const { error } = await deletePartner(partner.id);
     if (!error) onDeleted();
   }
+
+  const tzLabel = TIMEZONES.find(t => t.value === timezone)?.label || timezone;
+
   return (
     <div className="settings-section">
       <div className="settings-group">
@@ -1226,6 +1260,38 @@ function SettingsPage({ partner, onDeleted }) {
         <div className="settings-row"><span className="settings-key">Partner ID</span><span className="settings-val mono">{partner.id}</span></div>
         <div className="settings-row"><span className="settings-key">Created</span><span className="settings-val">{new Date(partner.created_at).toLocaleDateString()}</span></div>
       </div>
+
+      <div className="settings-group">
+        <h4 className="settings-label">Timezone</h4>
+        <p className="settings-sub">Sets how timestamps are displayed across this partner's dashboard. The tracker always records in UTC — this is display only.</p>
+
+        <div className="tz-picker-row">
+          <select
+            className="field-input tz-select"
+            value={timezone}
+            onChange={e => { setTimezone(e.target.value); setSaved(false); }}
+          >
+            {TIMEZONES.map(tz => (
+              <option key={tz.value} value={tz.value}>{tz.label}</option>
+            ))}
+          </select>
+          <button
+            className="btn-primary"
+            onClick={handleSaveTimezone}
+            disabled={saving || timezone === (partner.timezone || 'UTC')}
+          >
+            {saving ? <span className="spinner" /> : saved ? '✓ Saved' : 'Save'}
+          </button>
+        </div>
+
+        {saveError && <div className="login-error" style={{ marginTop: 10 }}>{saveError}</div>}
+
+        <div className="tz-clock-row">
+          <span className="tz-clock-label">Current time in {tzLabel}</span>
+          <span className="tz-clock">{currentTime}</span>
+        </div>
+      </div>
+
       <div className="settings-group danger-zone">
         <h4 className="settings-label danger">Danger zone</h4>
         <p className="settings-warn">Deleting a partner removes all associated event data permanently. This cannot be undone.</p>
@@ -1299,6 +1365,56 @@ function IconCode()   { return <svg width="14" height="14" viewBox="0 0 16 16" f
 function IconGear()   { return <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.5" stroke="currentColor" strokeWidth="1.5" opacity=".8"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.2 3.2l1.4 1.4M11.4 11.4l1.4 1.4M3.2 12.8l1.4-1.4M11.4 4.6l1.4-1.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity=".6"/></svg>; }
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
+
+// ─── Timezone-aware formatting ────────────────────────────────────────────────
+
+// Common IANA timezones grouped by region for the picker
+const TIMEZONES = [
+  { label: 'UTC',                          value: 'UTC' },
+  { label: 'Pacific Time (PT)',             value: 'America/Vancouver' },
+  { label: 'Mountain Time (MT)',            value: 'America/Denver' },
+  { label: 'Central Time (CT)',             value: 'America/Chicago' },
+  { label: 'Eastern Time (ET)',             value: 'America/New_York' },
+  { label: 'Atlantic Time (AT)',            value: 'America/Halifax' },
+  { label: 'Newfoundland (NT)',             value: 'America/St_Johns' },
+  { label: 'São Paulo (BRT)',               value: 'America/Sao_Paulo' },
+  { label: 'London (GMT/BST)',              value: 'Europe/London' },
+  { label: 'Paris / Berlin (CET)',          value: 'Europe/Paris' },
+  { label: 'Helsinki (EET)',                value: 'Europe/Helsinki' },
+  { label: 'Moscow (MSK)',                  value: 'Europe/Moscow' },
+  { label: 'Dubai (GST)',                   value: 'Asia/Dubai' },
+  { label: 'Karachi (PKT)',                 value: 'Asia/Karachi' },
+  { label: 'India (IST)',                   value: 'Asia/Kolkata' },
+  { label: 'Bangladesh (BST)',              value: 'Asia/Dhaka' },
+  { label: 'Bangkok (ICT)',                 value: 'Asia/Bangkok' },
+  { label: 'Singapore / KL (SGT)',          value: 'Asia/Singapore' },
+  { label: 'Hong Kong / Beijing (CST)',     value: 'Asia/Hong_Kong' },
+  { label: 'Tokyo (JST)',                   value: 'Asia/Tokyo' },
+  { label: 'Sydney (AEDT)',                 value: 'Australia/Sydney' },
+  { label: 'Auckland (NZST)',               value: 'Pacific/Auckland' },
+];
+
+function fmtInTz(ts, tz, opts = {}) {
+  if (!ts) return '—';
+  const date = new Date(ts);
+  const timezone = tz || 'UTC';
+  const defaultOpts = { timeZone: timezone, year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+  return date.toLocaleString('en-CA', { ...defaultOpts, ...opts });
+}
+
+function fmtDateInTz(ts, tz) {
+  if (!ts) return '—';
+  return new Date(ts).toLocaleDateString('en-CA', { timeZone: tz || 'UTC', year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function fmtTimeInTz(ts, tz) {
+  if (!ts) return '—';
+  return new Date(ts).toLocaleTimeString('en-CA', { timeZone: tz || 'UTC', hour: '2-digit', minute: '2-digit' });
+}
+
+function nowInTz(tz) {
+  return new Date().toLocaleTimeString('en-CA', { timeZone: tz || 'UTC', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
 
 function fmt(n) {
   if (n == null) return '—';

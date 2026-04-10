@@ -70,7 +70,7 @@ export default function FormsPage({ partner }) {
           </div>
           <div className="forms-detail">
             {activeForm
-              ? <FormDetail form={activeForm} clientId={partner.id} />
+              ? <FormDetail form={activeForm} clientId={partner.id} timezone={partner.timezone} />
               : <div className="forms-pick">Select a form to view analytics</div>
             }
           </div>
@@ -131,7 +131,7 @@ function AddFormModal({ clientId, onClose, onCreated }) {
 
 // ─── Form detail ──────────────────────────────────────────────────────────────
 
-function FormDetail({ form, clientId }) {
+function FormDetail({ form, clientId, timezone }) {
   const [versions, setVersions]           = useState([]);
   const [activeVersionId, setActiveVersionId] = useState(null);
   const [tab, setTab]                     = useState('funnel');
@@ -205,7 +205,7 @@ function FormDetail({ form, clientId }) {
         <FunnelTab formVersionId={activeVersionId} version={activeVersion} />
       )}
       {tab === 'sessions' && activeVersionId && (
-        <SessionsTab formVersionId={activeVersionId} />
+        <SessionsTab formVersionId={activeVersionId} clientId={clientId} timezone={timezone} />
       )}
       {tab === 'actions' && (
         <ActionsTab form={form} clientId={clientId} />
@@ -235,7 +235,7 @@ function FunnelTab({ formVersionId, version }) {
 
 // ─── Sessions tab ─────────────────────────────────────────────────────────────
 
-function SessionsTab({ formVersionId }) {
+function SessionsTab({ formVersionId, clientId, timezone }) {
   const [sessions, setSessions]       = useState([]);
   const [loading, setLoading]         = useState(true);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -252,7 +252,7 @@ function SessionsTab({ formVersionId }) {
   async function handleDelete() {
     if (!confirmDelete) return;
     try {
-      await deleteFormSession(formVersionId, confirmDelete);
+      await deleteFormSession(clientId, confirmDelete);
       await loadSessions();
     } catch (err) {
       alert('Delete failed: ' + err.message);
@@ -309,7 +309,7 @@ function SessionsTab({ formVersionId }) {
               </span>
               <span className="mono-sm">{s.utm_source || 'direct'}</span>
               <span className="mono-sm">{s.country || '—'}</span>
-              <span className="ce-date">{s.created_at ? new Date(s.created_at).toLocaleDateString() : '—'}</span>
+              <span className="ce-date">{s.created_at ? new Date(s.created_at).toLocaleDateString('en-CA', { timeZone: timezone || 'UTC', year: 'numeric', month: 'short', day: 'numeric' }) : '—'}</span>
               <span>
                 <button className="btn-icon-danger" onClick={() => setConfirmDelete(s.session_id)}>✕</button>
               </span>

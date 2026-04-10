@@ -179,15 +179,16 @@ export async function getFormSessions(formVersionId, limit = 100) {
   });
 }
 
-export async function deleteFormSession(formVersionId, sessionId) {
-  // Delete all form-related events for this session.
-  // We scope to form_version_id so we only delete events tied to this
-  // specific form — the session may have other unrelated events we must keep.
+export async function deleteFormSession(clientId, sessionId) {
+  // Delete all form-related events for this session scoped to this client.
+  // We do NOT filter by form_version_id here because form_scan events are
+  // written before the version is resolved and may have form_version_id = null,
+  // which would cause those rows to be missed and the session to re-appear.
   const { error } = await supabase
     .from('events')
     .delete()
+    .eq('client_id', clientId)
     .eq('session_id', sessionId)
-    .eq('form_version_id', formVersionId)
     .in('type', ['form_field', 'form_submit', 'form_scan']);
 
   if (error) throw error;
