@@ -131,7 +131,7 @@ function Dashboard({ session }) {
               <div className="nav-section">{activePartner.name}</div>
               {[
                 { id: 'overview',    label: 'Overview',        icon: <IconChart /> },
-                { id: 'goals',       label: 'Conversion goals', icon: <IconTarget /> },
+                { id: 'goals',       label: 'Conversions',      icon: <IconTarget /> },
                 { id: 'pages',       label: 'Top pages',        icon: <IconPages /> },
                 { id: 'sources',     label: 'Sources',          icon: <IconSource /> },
                 { id: 'paths',       label: 'Conversion paths', icon: <IconPath /> },
@@ -465,15 +465,17 @@ function OverviewPage({ partner, filter }) {
           <div className="breakdown-rows">
             <div className="breakdown-row">
               <span>New visitors</span>
-              <span className="breakdown-val">{fmt(data.newVisitors)}</span>
+              <span className="breakdown-val-group">
+                <span className="breakdown-val">{fmt(data.newVisitors)}</span>
+                <span className="breakdown-sub">{data.newConvRate}% conv</span>
+              </span>
             </div>
             <div className="breakdown-row">
               <span>Returning visitors</span>
-              <span className="breakdown-val">{fmt(data.returningVisitors)}</span>
-            </div>
-            <div className="breakdown-row">
-              <span>Clicks</span>
-              <span className="breakdown-val">{fmt(data.clicks)}</span>
+              <span className="breakdown-val-group">
+                <span className="breakdown-val">{fmt(data.returningVisitors)}</span>
+                <span className="breakdown-sub">{data.returningConvRate}% conv</span>
+              </span>
             </div>
           </div>
         </div>
@@ -481,9 +483,9 @@ function OverviewPage({ partner, filter }) {
           <h4 className="card-label">Conversions by goal</h4>
           {Object.keys(data.conversionsByGoal).length === 0
             ? <p className="empty-note">No conversions yet. Set up goals to start tracking.</p>
-            : Object.entries(data.conversionsByGoal).map(([goalId, count]) => (
-              <div key={goalId} className="breakdown-row">
-                <span className="mono-sm">{goalId.slice(0, 8)}…</span>
+            : Object.entries(data.conversionsByGoal).map(([name, count]) => (
+              <div key={name} className="breakdown-row">
+                <span className="breakdown-goal-name">{name}</span>
                 <span className="breakdown-val">{count}</span>
               </div>
             ))
@@ -503,7 +505,7 @@ function GoalsPage({ partner, filter }) {
   const [eventsLoading, setEventsLoading] = useState(true);
   const [showAdd, setShowAdd]         = useState(false);
   const [editGoal, setEditGoal]       = useState(null); // goal object to edit
-  const [tab, setTab]                 = useState('goals');
+  const [tab, setTab]                 = useState('events');
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [sessionPath, setSessionPath] = useState(null); // { ev, steps[] }
   const [pathLoading, setPathLoading] = useState(false);
@@ -524,7 +526,7 @@ function GoalsPage({ partner, filter }) {
   }, [partner.id, JSON.stringify(filter)]); // eslint-disable-line
 
   useEffect(() => { loadGoals(); }, [loadGoals]);
-  useEffect(() => { if (tab === 'events') loadEvents(); }, [tab, loadEvents]);
+  useEffect(() => { loadEvents(); }, [loadEvents]);
 
   async function handleConfirmDelete() {
     if (!confirmDelete) return;
@@ -616,17 +618,17 @@ function GoalsPage({ partner, filter }) {
       <div className="section-header">
         <div>
           <h3 className="section-title">Conversions</h3>
-          <p className="section-sub">Goals and conversion events for {partner.domain}</p>
+          <p className="section-sub">Conversion events and triggers for {partner.domain}</p>
         </div>
-        {tab === 'goals' && <button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add goal</button>}
+        {tab === 'goals' && <button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add trigger</button>}
       </div>
 
       <div className="goals-tabs">
-        <button className={`goals-tab ${tab === 'goals' ? 'active' : ''}`} onClick={() => setTab('goals')}>
-          Goals <span className="goals-tab-count">{goals.length}</span>
-        </button>
         <button className={`goals-tab ${tab === 'events' ? 'active' : ''}`} onClick={() => setTab('events')}>
-          Conversion events <span className="goals-tab-count">{events.length || ''}</span>
+          Conversions <span className="goals-tab-count">{events.length || ''}</span>
+        </button>
+        <button className={`goals-tab ${tab === 'goals' ? 'active' : ''}`} onClick={() => setTab('goals')}>
+          Conversion triggers <span className="goals-tab-count">{goals.length}</span>
         </button>
       </div>
 
@@ -639,12 +641,12 @@ function GoalsPage({ partner, filter }) {
         />
       )}
 
-      {/* ── Goals tab ── */}
+      {/* ── Conversion Triggers tab ── */}
       {tab === 'goals' && (
         loading
           ? <div className="loading-state"><div className="spinner lg" /></div>
           : goals.length === 0
-            ? <div className="empty-state"><div className="empty-icon">◎</div><h3>No goals yet</h3><p>Add a conversion goal to start tracking what matters.</p><button className="btn-primary" onClick={() => setShowAdd(true)}>Add your first goal</button></div>
+            ? <div className="empty-state"><div className="empty-icon">◎</div><h3>No triggers yet</h3><p>Add a conversion trigger to start tracking what matters.</p><button className="btn-primary" onClick={() => setShowAdd(true)}>Add your first trigger</button></div>
             : (
               <div className="goals-list">
                 {goals.map(goal => (
@@ -665,7 +667,7 @@ function GoalsPage({ partner, filter }) {
             )
       )}
 
-      {/* ── Events tab ── */}
+      {/* ── Conversions tab ── */}
       {tab === 'events' && (
         eventsLoading
           ? <div className="loading-state"><div className="spinner lg" /></div>
@@ -752,7 +754,7 @@ function GoalModal({ clientId, goal, onClose, onSaved }) {
     <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal modal-lg">
         <div className="modal-header">
-          <h3>{isEdit ? 'Edit goal' : 'Add conversion goal'}</h3>
+          <h3>{isEdit ? 'Edit trigger' : 'Add conversion trigger'}</h3>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <form onSubmit={handleSubmit}>
@@ -840,7 +842,7 @@ function GoalModal({ clientId, goal, onClose, onSaved }) {
 
           <div className="modal-actions">
             <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn-primary" disabled={loading}>{loading ? <span className="spinner" /> : isEdit ? 'Save changes' : 'Save goal'}</button>
+            <button type="submit" className="btn-primary" disabled={loading}>{loading ? <span className="spinner" /> : isEdit ? 'Save changes' : 'Save trigger'}</button>
           </div>
         </form>
       </div>

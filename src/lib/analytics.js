@@ -89,7 +89,15 @@ export async function getOverview(clientId, filter = {}) {
 
   const visitorMap = {};
   curr.sessions.forEach(s => { visitorMap[s.visitor_id] = (visitorMap[s.visitor_id] || 0) + 1; });
-  const newVisitors = Object.values(visitorMap).filter(n => n === 1).length;
+  const newVisitorIds      = new Set(Object.entries(visitorMap).filter(([, n]) => n === 1).map(([id]) => id));
+  const newSessions        = curr.sessions.filter(s => newVisitorIds.has(s.visitor_id));
+  const returningSessions  = curr.sessions.filter(s => !newVisitorIds.has(s.visitor_id));
+  const newSessionIds      = new Set(newSessions.map(s => s.session_id));
+  const returningSessionIds = new Set(returningSessions.map(s => s.session_id));
+  const newConvs           = conversions.filter(c => newSessionIds.has(c.session_id));
+  const returningConvs     = conversions.filter(c => returningSessionIds.has(c.session_id));
+  const newConvRate        = newSessions.length > 0 ? (newConvs.length / newSessions.length * 100).toFixed(2) : '0.00';
+  const returningConvRate  = returningSessions.length > 0 ? (returningConvs.length / returningSessions.length * 100).toFixed(2) : '0.00';
 
   function delta(c, p) {
     if (!p) return null;
@@ -107,7 +115,10 @@ export async function getOverview(clientId, filter = {}) {
     conversions: convCount, conversionsDelta: delta(convCount, prevConvCount),
     convRate: convRate.toFixed(2), convRateDelta: delta(convRate, prevConvRate),
     pageviews, clicks,
-    newVisitors, returningVisitors: sessionCount - newVisitors,
+    newVisitors: newSessions.length,
+    returningVisitors: returningSessions.length,
+    newConvRate,
+    returningConvRate,
     conversionsByGoal,
   };
 }

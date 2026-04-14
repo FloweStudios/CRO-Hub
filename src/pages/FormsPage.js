@@ -32,7 +32,7 @@ export default function FormsPage({ partner }) {
       <div className="section-header">
         <div>
           <h3 className="section-title">Form analytics</h3>
-          <p className="section-sub">Field-level funnel, sessions, and submission actions</p>
+          <p className="section-sub">Field-level funnel, sessions, and submission triggers</p>
         </div>
         <button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add form</button>
       </div>
@@ -198,7 +198,7 @@ function FormDetail({ form, clientId, timezone }) {
       <div className="goals-tabs">
         <button className={`goals-tab ${tab === 'funnel' ? 'active' : ''}`} onClick={() => setTab('funnel')}>Funnel</button>
         <button className={`goals-tab ${tab === 'sessions' ? 'active' : ''}`} onClick={() => setTab('sessions')}>Sessions</button>
-        <button className={`goals-tab ${tab === 'actions' ? 'active' : ''}`} onClick={() => setTab('actions')}>Submit actions</button>
+        <button className={`goals-tab ${tab === 'actions' ? 'active' : ''}`} onClick={() => setTab('actions')}>Submit triggers</button>
       </div>
 
       {tab === 'funnel' && activeVersionId && (
@@ -290,6 +290,7 @@ function SessionsTab({ formVersionId, clientId, timezone }) {
           <div className="form-sessions-head">
             <span>Status</span>
             <span>Fields filled</span>
+            <span>Fill time</span>
             <span>Device</span>
             <span>Source</span>
             <span>Country</span>
@@ -304,6 +305,9 @@ function SessionsTab({ formVersionId, clientId, timezone }) {
                 </span>
               </span>
               <span className="mono-sm">{s.fields_filled}</span>
+              <span className="mono-sm">
+                {s.total_form_time_ms != null ? fmtMs(s.total_form_time_ms) : '—'}
+              </span>
               <span>
                 {s.device_type && <span className={`device-pill device-${s.device_type}`}>{s.device_type}</span>}
               </span>
@@ -379,7 +383,7 @@ function ActionsTab({ form, clientId }) {
             Define what counts as a form submission for <strong style={{ color: 'var(--text)' }}>{form.name}</strong>. Fires a <code>form_submit</code> event when triggered. Counts as a conversion only if a matching conversion goal is set up.
           </p>
         </div>
-        <button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add action</button>
+        <button className="btn-primary" onClick={() => setShowAdd(true)}>+ Add trigger</button>
       </div>
 
       {showAdd && (
@@ -395,7 +399,7 @@ function ActionsTab({ form, clientId }) {
         : actions.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">◎</div>
-            <h3>No submission actions</h3>
+            <h3>No submission triggers</h3>
             <p>Add an action to define what counts as a form submission — a button click, page redirect, element appearing, etc.</p>
           </div>
         ) : (
@@ -456,7 +460,7 @@ function AddActionModal({ formId, clientId, onClose, onCreated }) {
   return (
     <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal modal-lg">
-        <div className="modal-header"><h3>Add submission action</h3><button className="modal-close" onClick={onClose}>✕</button></div>
+        <div className="modal-header"><h3>Add submission trigger</h3><button className="modal-close" onClick={onClose}>✕</button></div>
         <form onSubmit={handleSubmit}>
           {error && <div className="login-error">{error}</div>}
 
@@ -522,7 +526,7 @@ function AddActionModal({ formId, clientId, onClose, onCreated }) {
 
           <div className="modal-actions">
             <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn-primary" disabled={loading}>{loading ? <span className="spinner" /> : 'Save action'}</button>
+            <button type="submit" className="btn-primary" disabled={loading}>{loading ? <span className="spinner" /> : 'Save trigger'}</button>
           </div>
         </form>
       </div>

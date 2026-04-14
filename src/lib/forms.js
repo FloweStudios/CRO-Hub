@@ -143,34 +143,33 @@ export async function getFieldTransitionTimes(formVersionId) {
 // ── Form sessions ─────────────────────────────────────────────────────────────
 
 export async function getFormSessions(formVersionId, limit = 100) {
-  // Get all events for this form version — include type and field_name for counting
+  // Include total_form_time_ms from form_submit events for avg fill time display
   const { data: fieldEvents } = await supabase
     .from('events')
-    .select('session_id, type, field_name, ts, url')
+    .select('session_id, type, field_name, total_form_time_ms, ts, url')
     .eq('form_version_id', formVersionId)
     .in('type', ['form_field', 'form_submit'])
     .order('ts', { ascending: false });
 
   if (!fieldEvents || fieldEvents.length === 0) return [];
 
-  // Get unique sessions
   const sessionIds = [...new Set(fieldEvents.map(e => e.session_id))].slice(0, limit);
 
-  // Get session metadata (includes country + device_type from sessions table)
   const { data: sessions } = await supabase
     .from('sessions')
     .select('session_id, visitor_id, device_type, utm_source, utm_medium, country, created_at, converted')
     .in('session_id', sessionIds);
 
-  // Determine submitted sessions and count unique fields filled per session
   const submitSet = new Set();
-  const fieldSets = {}; // session_id -> Set of unique field_names touched
+  const fieldSets = {};
   const sessionUrls = {};
+  const formTimes = {}; // session_id -> total_form_time_ms from submit event
 
   fieldEvents.forEach(ev => {
     if (!sessionUrls[ev.session_id]) sessionUrls[ev.session_id] = ev.url;
     if (ev.type === 'form_submit') {
       submitSet.add(ev.session_id);
+      if (ev.total_form_time_ms) formTimes[ev.session_id] = ev.total_form_time_ms;
     }
     if (ev.type === 'form_field' && ev.field_name) {
       if (!fieldSets[ev.session_id]) fieldSets[ev.session_id] = new Set();
@@ -181,16 +180,17 @@ export async function getFormSessions(formVersionId, limit = 100) {
   return sessionIds.map(sid => {
     const session = (sessions || []).find(s => s.session_id === sid) || {};
     return {
-      session_id:    sid,
-      visitor_id:    session.visitor_id,
-      device_type:   session.device_type,
-      utm_source:    session.utm_source,
-      country:       session.country,
-      created_at:    session.created_at,
-      url:           sessionUrls[sid],
-      fields_filled: fieldSets[sid]?.size ?? 0,
-      submitted:     submitSet.has(sid),
-      status:        submitSet.has(sid) ? 'submitted' : 'abandoned',
+      session_id:       sid,
+      visitor_id:       session.visitor_id,
+      device_type:      session.device_type,
+      utm_source:       session.utm_source,
+      country:          session.country,
+      created_at:       session.created_at,
+      url:              sessionUrls[sid],
+      fields_filled:    fieldSets[sid]?.size ?? 0,
+      total_form_time_ms: formTimes[sid] ?? null,
+      submitted:        submitSet.has(sid),
+      status:           submitSet.has(sid) ? 'submitted' : 'abandoned',
     };
   });
 }
