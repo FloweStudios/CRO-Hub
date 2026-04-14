@@ -56,14 +56,15 @@ export async function createPartner({ name, domain }) {
 // We use a deliberately wide range (2020-01-01 to now+1d) to catch all data.
 export async function clearPartnerData(id) {
   const since = '2020-01-01T00:00:00.000Z';
-  const until = new Date(Date.now() + 86400000).toISOString(); // tomorrow
+  const until = new Date(Date.now() + 86400000).toISOString();
 
-  // Delete in FK-safe order: events referencing sessions, then sessions
+  // Delete in FK-safe order: events first (holds FK to form_versions and sessions),
+  // then the tables they reference.
   const steps = [
+    () => supabase.from('events').delete().eq('client_id', id).gte('created_at', since).lte('created_at', until),
     () => supabase.from('conversion_events').delete().eq('client_id', id).gte('created_at', since).lte('created_at', until),
     () => supabase.from('form_versions').delete().eq('client_id', id),
     () => supabase.from('sessions').delete().eq('client_id', id).gte('created_at', since).lte('created_at', until),
-    () => supabase.from('events').delete().eq('client_id', id).gte('created_at', since).lte('created_at', until),
   ];
 
   for (const step of steps) {
