@@ -437,16 +437,78 @@ export async function getFormAnalytics(clientId, days = 30) {
 
 // ── Visitor latency ───────────────────────────────────────────────────────────
 
-export async function getVisitorLatency(clientId) {
-  const { data } = await supabase.from('visitor_conversion_latency').select('*').eq('client_id', clientId);
-  if (!data || data.length === 0) return { avgSessions: 0, avgHours: 0, distribution: [] };
+export async function getVisitorLatency(clientId, filter = {}) {
+  const { since, until } = resolveRange(filter);
+  const { sources, mediums } = filter;
 
-  const avgSessions = (data.reduce((a, b) => a + Number(b.total_sessions), 0) / data.length).toFixed(1);
-  const avgHours    = (data.reduce((a, b) => a + Number(b.hours_to_conversion), 0) / data.length).toFixed(1);
+  // Build latency from raw data so date range and source filter work correctly.
+  // The visitor_conversion_latency view has no date/source columns so we bypass it.
+  const [sessRes, convRes] = await Promise.all([
+    supabase.from('sessions')
+      .select('session_id, visitor_id, utm_source, utm_medium, created_at, converted')
+      .eq('client_id', clientId)
+      .gte('created_at', since).lte('created_at', until),
+    supabase.from('conversion_events')
+      .select('session_id, created_at')
+      .eq('client_id', clientId)
+      .gte('created_at', since).lte('created_at', until),
+  ]);
+
+  if (!sessRes.data || sessRes.data.length === 0) return { avgSessions: 0, avgHours: 0, distribution: [], totalConverters: 0 };
+
+  // Apply source/medium filter
+  const allSessions = sessRes.data;
+  const filteredSessions = (sources?.length || mediums?.length)
+    ? allSessions.filter(s => {
+        const srcOk = !sources?.length || sources.includes(s.utm_source || 'direct');
+        const medOk = !mediums?.length || mediums.includes(s.utm_medium || 'none');
+        return srcOk && medOk;
+      })
+    : allSessions;
+
+  // Map session_id -> visitor_id for filtered sessions
+  const sessionToVisitor = {};
+  filteredSessions.forEach(s => { sessionToVisitor[s.session_id] = s.visitor_id; });
+  const filteredSessionIds = new Set(filteredSessions.map(s => s.session_id));
+
+  // Find converting sessions that pass filter
+  const convertingSessionIds = new Set(
+    (convRes.data || [])
+      .filter(c => filteredSessionIds.has(c.session_id))
+      .map(c => c.session_id)
+  );
+
+  if (convertingSessionIds.size === 0) return { avgSessions: 0, avgHours: 0, distribution: [], totalConverters: 0 };
+
+  // Group all filtered sessions by visitor_id
+  const visitorSessions = {};
+  filteredSessions.forEach(s => {
+    if (!visitorSessions[s.visitor_id]) visitorSessions[s.visitor_id] = [];
+    visitorSessions[s.visitor_id].push(s);
+  });
+
+  // For each visitor who converted, compute total sessions before conversion and time span
+  const converterData = [];
+  convertingSessionIds.forEach(sid => {
+    const vid = sessionToVisitor[sid];
+    if (!vid) return;
+    const allVisitorSessions = (visitorSessions[vid] || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    const convIdx = allVisitorSessions.findIndex(s => s.session_id === sid);
+    const sessionsToConvert = convIdx >= 0 ? convIdx + 1 : allVisitorSessions.length;
+    const firstSeen = new Date(allVisitorSessions[0]?.created_at);
+    const convTime  = new Date(allVisitorSessions[convIdx >= 0 ? convIdx : 0]?.created_at);
+    const hoursToConversion = (convTime - firstSeen) / 3600000;
+    converterData.push({ sessions: sessionsToConvert, hours: hoursToConversion });
+  });
+
+  if (converterData.length === 0) return { avgSessions: 0, avgHours: 0, distribution: [], totalConverters: 0 };
+
+  const avgSessions = (converterData.reduce((a, b) => a + b.sessions, 0) / converterData.length).toFixed(1);
+  const avgHours    = (converterData.reduce((a, b) => a + b.hours,   0) / converterData.length).toFixed(1);
 
   const dist = { '1': 0, '2': 0, '3-5': 0, '6+': 0 };
-  data.forEach(v => {
-    const n = Number(v.total_sessions);
+  converterData.forEach(v => {
+    const n = v.sessions;
     if (n === 1) dist['1']++;
     else if (n === 2) dist['2']++;
     else if (n <= 5) dist['3-5']++;
@@ -454,7 +516,7 @@ export async function getVisitorLatency(clientId) {
   });
 
   return {
-    avgSessions, avgHours, totalConverters: data.length,
+    avgSessions, avgHours, totalConverters: converterData.length,
     distribution: Object.entries(dist).map(([label, count]) => ({ label, count })),
   };
 }

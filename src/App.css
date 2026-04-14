@@ -1035,3 +1035,37 @@ select.field-input { cursor: pointer; }
 .danger-action-title { font-size: 0.9rem; font-weight: 500; color: var(--text); }
 .danger-action-desc { font-size: 0.82rem; color: var(--text2); line-height: 1.5; }
 .danger-cleared { font-size: 0.85rem; color: var(--green); font-weight: 500; white-space: nowrap; padding-top: 6px; }
+/* ── Conversion paths table ──────────────────────────────────────────────────── */
+.col-path-count { width: 80px; flex-shrink: 0; }
+.col-path-steps { flex: 1; min-width: 0; }
+.path-table-row {
+  display: flex; align-items: flex-start; padding: 14px 18px;
+  border-top: 1px solid var(--border); gap: 12px;
+  transition: background 0.1s;
+}
+.path-table-row:hover { background: rgba(255,255,255,0.02); }
+.path-rank-bar-wrap { width: 60px; height: 4px; background: rgba(255,255,255,0.07); border-radius: 2px; margin-top: 6px; }
+.path-rank-bar { height: 100%; background: var(--accent-1); border-radius: 2px; opacity: 0.5; }
+.path-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.path-chip {
+  display: inline-flex; flex-direction: column; gap: 2px;
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 6px; padding: 5px 10px; min-width: 0;
+}
+.path-chip-url { font-family: var(--mono); font-size: 0.78rem; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.path-chip-stats { display: flex; gap: 8px; }
+.path-chip-stat { font-size: 0.7rem; color: var(--text3); white-space: nowrap; }
+.path-chip-arrow { color: var(--text3); font-size: 0.8rem; flex-shrink: 0; }
+.path-chip-conv { background: var(--green-dim); border-color: rgba(46,204,113,0.3); }
+.path-chip-conv .path-chip-url { color: var(--green); font-family: inherit; font-weight: 500; }
+
+/* ── Form select list (GoalModal form_submit) ────────────────────────────────── */
+.form-select-list { display: flex; flex-direction: column; gap: 2px; background: var(--bg2); border: 1px solid var(--border-md); border-radius: var(--radius); overflow: hidden; }
+.form-select-row {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  cursor: pointer; transition: background 0.1s; font-size: 0.88rem;
+}
+.form-select-row:hover { background: rgba(255,255,255,0.04); }
+.form-select-row input[type="checkbox"] { accent-color: var(--accent-1); flex-shrink: 0; }
+.form-select-name { font-weight: 500; color: var(--text); flex-shrink: 0; }
+.form-select-selector { color: var(--text3); font-size: 0.78rem; margin-left: auto; }

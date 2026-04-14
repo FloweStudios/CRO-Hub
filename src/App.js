@@ -710,7 +710,6 @@ function GoalsPage({ partner, filter }) {
 // ─── Unified add/edit goal modal ──────────────────────────────────────────────
 
 function GoalModal({ clientId, goal, onClose, onSaved }) {
-  // If goal is passed we're editing; otherwise adding
   const isEdit = !!goal;
 
   const [name, setName]                     = useState(goal?.name || '');
@@ -721,8 +720,29 @@ function GoalModal({ clientId, goal, onClose, onSaved }) {
   const [matchType, setMatchType]           = useState(goal?.match_type || 'exact');
   const [clickUrlPattern, setClickUrlPattern] = useState(goal?.type === 'click_url' ? (goal?.url_pattern || '') : '');
   const [clickUrlMatch, setClickUrlMatch]   = useState(goal?.match_type || 'contains');
+  const [formDefs, setFormDefs]             = useState([]);
+  const [selForms, setSelForms]             = useState(() => {
+    // Pre-populate from existing selector if editing a form_submit goal
+    if (goal?.type === 'form_submit' && goal?.css_selector) {
+      return goal.css_selector.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    return [];
+  });
   const [loading, setLoading]               = useState(false);
   const [error, setError]                   = useState('');
+
+  // Load form definitions when form_submit type is selected
+  useEffect(() => {
+    if (type === 'form_submit') {
+      import('../lib/forms').then(({ getFormDefinitions }) => {
+        getFormDefinitions(clientId).then(({ data }) => setFormDefs(data || []));
+      });
+    }
+  }, [type, clientId]);
+
+  function toggleForm(selector) {
+    setSelForms(prev => prev.includes(selector) ? prev.filter(s => s !== selector) : [...prev, selector]);
+  }
 
   async function handleSubmit(e) {
     e.preventDefault(); setError('');
@@ -735,9 +755,13 @@ function GoalModal({ clientId, goal, onClose, onSaved }) {
     } else if (type === 'click_url') {
       if (!clickUrlPattern.trim()) { setError('URL pattern is required'); return; }
       cssSelector = 'a'; finalUrlPattern = clickUrlPattern.trim(); finalMatchType = clickUrlMatch;
-    } else if (type === 'element_visible' || type === 'form_submit') {
+    } else if (type === 'element_visible') {
       if (!selector.trim()) { setError('CSS selector is required'); return; }
       cssSelector = selector.trim();
+    } else if (type === 'form_submit') {
+      if (selForms.length === 0 && !selector.trim()) { setError('Select at least one form or enter a CSS selector'); return; }
+      // If forms selected from list, use their selectors joined; else fall back to manual input
+      cssSelector = selForms.length > 0 ? selForms.join(', ') : selector.trim();
     } else if (type === 'page_load') {
       if (!urlPattern.trim()) { setError('URL pattern is required'); return; }
       finalUrlPattern = urlPattern.trim();
@@ -806,10 +830,36 @@ function GoalModal({ clientId, goal, onClose, onSaved }) {
             </>
           )}
 
-          {(type === 'element_visible' || type === 'form_submit') && (
+          {type === 'element_visible' && (
             <div className="field">
               <label className="field-label">CSS selector</label>
-              <input className="field-input mono" value={selector} onChange={e => setSelector(e.target.value)} placeholder={type === 'form_submit' ? 'form, form#contact' : '#pricing-section, .cta-banner'} />
+              <input className="field-input mono" value={selector} onChange={e => setSelector(e.target.value)} placeholder="#pricing-section, .cta-banner" />
+            </div>
+          )}
+
+          {type === 'form_submit' && (
+            <div className="field">
+              <label className="field-label">Forms to track</label>
+              {formDefs.length > 0 ? (
+                <>
+                  <div className="form-select-list">
+                    {formDefs.map(f => (
+                      <label key={f.id} className="form-select-row">
+                        <input type="checkbox" checked={selForms.includes(f.selector)} onChange={() => toggleForm(f.selector)} />
+                        <span className="form-select-name">{f.name}</span>
+                        <span className="form-select-selector mono-sm">{f.selector}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <span className="field-hint" style={{ marginTop: 8 }}>Or enter a custom selector below (leave blank to use selections above)</span>
+                  <input className="field-input mono" style={{ marginTop: 6 }} value={selector} onChange={e => setSelector(e.target.value)} placeholder="form, form#contact" />
+                </>
+              ) : (
+                <>
+                  <div className="goal-hint-box">No forms set up yet. Go to Form Analytics to add forms, or enter a CSS selector manually.</div>
+                  <input className="field-input mono" value={selector} onChange={e => setSelector(e.target.value)} placeholder="form, form#contact" />
+                </>
+              )}
             </div>
           )}
 
@@ -831,7 +881,6 @@ function GoalModal({ clientId, goal, onClose, onSaved }) {
             </>
           )}
 
-          {/* Status toggle — only shown when editing */}
           {isEdit && (
             <div className="field">
               <label className="field-label">Status</label>
@@ -1055,37 +1104,37 @@ function PathsPage({ partner, filter }) {
           paths.length === 0
             ? <div className="empty-state"><div className="empty-icon">◈</div><h3>No conversion paths yet</h3><p>Set up conversion goals and collect some data first.</p></div>
             : (
-              <div className="paths-list">
+              <div className="data-table">
+                <div className="table-head">
+                  <span className="col-path-count">#</span>
+                  <span className="col-path-steps">Path</span>
+                  <span className="col-num">Convs</span>
+                </div>
                 {paths.map((p, i) => (
-                  <div key={i} className="path-card">
-                    <div className="path-card-header">
-                      <div className="path-bar-wrap" style={{ flex: 1 }}>
-                        <div className="path-bar" style={{ width: `${(p.count / maxCount) * 100}%` }} />
+                  <div key={i} className="path-table-row">
+                    <span className="col-path-count">
+                      <div className="path-rank-bar-wrap">
+                        <div className="path-rank-bar" style={{ width: `${(p.count / maxCount) * 100}%` }} />
                       </div>
-                      <span className="path-count">{p.count} conversion{p.count !== 1 ? 's' : ''}</span>
-                    </div>
-                    <div className="path-steps-row">
-                      {p.steps.map((step, j) => (
-                        <React.Fragment key={j}>
-                          <div className="path-step-card">
-                            <div className="psc-url mono-sm">{step.path}</div>
-                            <div className="psc-stats">
-                              <span className="psc-stat" title="Avg time on page">
-                                <span className="psc-stat-icon">⏱</span>
-                                {step.avgTimeMs != null ? fmtTime(Math.round(step.avgTimeMs / 1000)) : '—'}
-                              </span>
-                              <span className="psc-stat" title="Avg scroll depth">
-                                <span className="psc-stat-icon">↕</span>
-                                {step.avgDepth != null ? `${step.avgDepth}%` : '—'}
+                    </span>
+                    <span className="col-path-steps">
+                      <div className="path-chips">
+                        {p.steps.map((step, j) => (
+                          <React.Fragment key={j}>
+                            <div className="path-chip">
+                              <span className="path-chip-url">{step.path}</span>
+                              <span className="path-chip-stats">
+                                {step.avgTimeMs != null && <span className="path-chip-stat">⏱ {fmtTime(Math.round(step.avgTimeMs / 1000))}</span>}
+                                {step.avgDepth  != null && <span className="path-chip-stat">↕ {step.avgDepth}%</span>}
                               </span>
                             </div>
-                          </div>
-                          {j < p.steps.length - 1 && <span className="path-arrow">→</span>}
-                        </React.Fragment>
-                      ))}
-                      <span className="path-arrow">→</span>
-                      <div className="path-step-card path-step-conv">✓ Converted</div>
-                    </div>
+                            <span className="path-chip-arrow">›</span>
+                          </React.Fragment>
+                        ))}
+                        <div className="path-chip path-chip-conv">✓ Converted</div>
+                      </div>
+                    </span>
+                    <span className="col-num">{p.count}</span>
                   </div>
                 ))}
               </div>
@@ -1143,8 +1192,8 @@ function LatencyPage({ partner, filter }) {
 
   useEffect(() => {
     setLoading(true);
-    getVisitorLatency(partner.id).then(d => { setData(d); setLoading(false); });
-  }, [partner.id]);
+    getVisitorLatency(partner.id, filter).then(d => { setData(d); setLoading(false); });
+  }, [partner.id, JSON.stringify(filter)]); // eslint-disable-line
 
   if (loading) return <div className="loading-state"><div className="spinner lg" /></div>;
   if (!data) return null;
