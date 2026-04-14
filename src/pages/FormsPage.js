@@ -172,15 +172,7 @@ function FormDetail({ form, clientId, timezone }) {
 
   if (loading) return <div className="loading-state"><div className="spinner lg" /></div>;
 
-  if (versions.length === 0) {
-    return (
-      <div className="empty-state">
-        <div className="empty-icon">◎</div>
-        <h3>{cleared ? 'Data cleared' : `No data yet for "${form.name}"`}</h3>
-        <p>{cleared ? 'All analytics data for this form has been removed.' : `Once visitors interact with `}<code>{!cleared && form.selector}</code>{!cleared && ' the analytics will appear here.'}</p>
-      </div>
-    );
-  }
+  const hasData = versions.length > 0;
 
   return (
     <div className="form-detail">
@@ -210,7 +202,7 @@ function FormDetail({ form, clientId, timezone }) {
           <span className="mono-sm" style={{ marginLeft: 10 }}>{form.selector}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {versions.length > 0 && (
+          {hasData && (
             <div className="version-selector">
               <span className="version-label">Version</span>
               <select className="version-select" value={activeVersionId || ''} onChange={e => setActiveVersionId(e.target.value)}>
@@ -224,30 +216,44 @@ function FormDetail({ form, clientId, timezone }) {
               </select>
             </div>
           )}
-          <button className="btn-ghost btn-sm" style={{ color: 'var(--red)', borderColor: 'var(--red)' }} onClick={() => setShowClearConfirm(true)}>
-            Clear data
-          </button>
+          {hasData && (
+            <button className="btn-ghost btn-sm" style={{ color: 'var(--red)', borderColor: 'var(--red)' }} onClick={() => setShowClearConfirm(true)}>
+              Clear data
+            </button>
+          )}
         </div>
       </div>
 
-      {activeVersion && !activeVersion.is_current && (
+      {hasData && activeVersion && !activeVersion.is_current && (
         <div className="version-archive-notice">
           Viewing archived version v{activeVersion.version_number} — field structure changed on {new Date(activeVersion.last_seen).toLocaleDateString()}
         </div>
       )}
 
-      {/* Tabs */}
+      {/* Tabs — always visible so Submit triggers is always accessible */}
       <div className="goals-tabs">
         <button className={`goals-tab ${tab === 'funnel' ? 'active' : ''}`} onClick={() => setTab('funnel')}>Funnel</button>
         <button className={`goals-tab ${tab === 'sessions' ? 'active' : ''}`} onClick={() => setTab('sessions')}>Sessions</button>
         <button className={`goals-tab ${tab === 'actions' ? 'active' : ''}`} onClick={() => setTab('actions')}>Submit triggers</button>
       </div>
 
-      {tab === 'funnel' && activeVersionId && (
-        <FunnelTab formVersionId={activeVersionId} version={activeVersion} />
+      {tab === 'funnel' && (
+        hasData && activeVersionId
+          ? <FunnelTab formVersionId={activeVersionId} version={activeVersion} />
+          : <div className="empty-state" style={{ padding: '32px 0' }}>
+              <div className="empty-icon">◎</div>
+              <h3>{cleared ? 'Data cleared' : `No data yet`}</h3>
+              <p>{cleared ? 'All analytics data has been removed.' : `Once visitors interact with `}{!cleared && <code>{form.selector}</code>}{!cleared && ' the funnel will appear here.'}</p>
+            </div>
       )}
-      {tab === 'sessions' && activeVersionId && (
-        <SessionsTab formVersionId={activeVersionId} clientId={clientId} timezone={timezone} />
+      {tab === 'sessions' && (
+        hasData && activeVersionId
+          ? <SessionsTab formVersionId={activeVersionId} clientId={clientId} timezone={timezone} />
+          : <div className="empty-state" style={{ padding: '32px 0' }}>
+              <div className="empty-icon">◎</div>
+              <h3>No sessions yet</h3>
+              <p>Sessions will appear here once visitors interact with this form.</p>
+            </div>
       )}
       {tab === 'actions' && (
         <ActionsTab form={form} clientId={clientId} />

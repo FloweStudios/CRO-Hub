@@ -1072,7 +1072,6 @@ function PathsPage({ partner, filter }) {
     ]).then(([p, inf]) => { setPaths(p); setInfluence(inf); setLoading(false); });
   }, [partner.id, JSON.stringify(filter)]); // eslint-disable-line
 
-  const maxCount = useMemo(() => Math.max(...paths.map(p => p.count), 1), [paths]);
 
   const sortedInfluence = useMemo(() => {
     return [...influence].sort((a, b) => {
@@ -1106,37 +1105,40 @@ function PathsPage({ partner, filter }) {
             : (
               <div className="data-table">
                 <div className="table-head">
-                  <span className="col-path-count">#</span>
                   <span className="col-path-steps">Path</span>
+                  <span className="col-num">Avg time</span>
                   <span className="col-num">Convs</span>
                 </div>
-                {paths.map((p, i) => (
-                  <div key={i} className="path-table-row">
-                    <span className="col-path-count">
-                      <div className="path-rank-bar-wrap">
-                        <div className="path-rank-bar" style={{ width: `${(p.count / maxCount) * 100}%` }} />
-                      </div>
-                    </span>
-                    <span className="col-path-steps">
-                      <div className="path-chips">
-                        {p.steps.map((step, j) => (
-                          <React.Fragment key={j}>
-                            <div className="path-chip">
-                              <span className="path-chip-url">{step.path}</span>
-                              <span className="path-chip-stats">
-                                {step.avgTimeMs != null && <span className="path-chip-stat">⏱ {fmtTime(Math.round(step.avgTimeMs / 1000))}</span>}
-                                {step.avgDepth  != null && <span className="path-chip-stat">↕ {step.avgDepth}%</span>}
-                              </span>
-                            </div>
-                            <span className="path-chip-arrow">›</span>
-                          </React.Fragment>
-                        ))}
-                        <div className="path-chip path-chip-conv">✓ Converted</div>
-                      </div>
-                    </span>
-                    <span className="col-num">{p.count}</span>
-                  </div>
-                ))}
+                {paths.map((p, i) => {
+                  // Avg time across all steps that have timing data
+                  const stepTimes = p.steps.map(s => s.avgTimeMs).filter(t => t != null);
+                  const pathAvgMs = stepTimes.length > 0
+                    ? Math.round(stepTimes.reduce((a, b) => a + b, 0) / stepTimes.length)
+                    : null;
+                  return (
+                    <div key={i} className="path-table-row">
+                      <span className="col-path-steps">
+                        <div className="path-chips">
+                          {p.steps.map((step, j) => (
+                            <React.Fragment key={j}>
+                              <div className="path-chip">
+                                <span className="path-chip-url">{step.path}</span>
+                                <span className="path-chip-stats">
+                                  {step.avgTimeMs != null && <span className="path-chip-stat">⏱ {fmtTime(Math.round(step.avgTimeMs / 1000))}</span>}
+                                  {step.avgDepth  != null && <span className="path-chip-stat">↕ {step.avgDepth}%</span>}
+                                </span>
+                              </div>
+                              <span className="path-chip-arrow">›</span>
+                            </React.Fragment>
+                          ))}
+                          <div className="path-chip path-chip-conv">✓ Converted</div>
+                        </div>
+                      </span>
+                      <span className="col-num">{pathAvgMs != null ? fmtTime(Math.round(pathAvgMs / 1000)) : '—'}</span>
+                      <span className="col-num">{p.count}</span>
+                    </div>
+                  );
+                })}
               </div>
             )
         ) : (
