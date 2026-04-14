@@ -734,7 +734,7 @@ function GoalModal({ clientId, goal, onClose, onSaved }) {
   // Load form definitions when form_submit type is selected
   useEffect(() => {
     if (type === 'form_submit') {
-      import('../lib/forms').then(({ getFormDefinitions }) => {
+      import('./lib/forms').then(({ getFormDefinitions }) => {
         getFormDefinitions(clientId).then(({ data }) => setFormDefs(data || []));
       });
     }
