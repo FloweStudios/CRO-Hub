@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { supabase, signIn, signOut, onAuthChange, getPartners, createPartner, updatePartner, deletePartner, getGoals, createGoal, updateGoal, deleteGoal } from './lib/supabase';
+import { supabase, signIn, signOut, onAuthChange, getPartners, createPartner, updatePartner, clearPartnerData, deletePartner, getGoals, createGoal, updateGoal, deleteGoal } from './lib/supabase';
 import { generateSnippet } from './lib/snippet';
 import { getOverview, getDailySeries, getTopPages, getSources, getConversionPaths, getPageInfluence, getSessionPath, getFormAnalytics, getVisitorLatency } from './lib/analytics';
 import './App.css';
@@ -1066,16 +1066,14 @@ function PathsPage({ partner, filter }) {
                           <div className="path-step-card">
                             <div className="psc-url mono-sm">{step.path}</div>
                             <div className="psc-stats">
-                              {step.avgTimeMs != null && (
-                                <span className="psc-stat" title="Avg time on page">
-                                  <span className="psc-stat-icon">⏱</span>{fmtTime(Math.round(step.avgTimeMs / 1000))}
-                                </span>
-                              )}
-                              {step.avgDepth != null && (
-                                <span className="psc-stat" title="Avg scroll depth">
-                                  <span className="psc-stat-icon">↕</span>{step.avgDepth}%
-                                </span>
-                              )}
+                              <span className="psc-stat" title="Avg time on page">
+                                <span className="psc-stat-icon">⏱</span>
+                                {step.avgTimeMs != null ? fmtTime(Math.round(step.avgTimeMs / 1000)) : '—'}
+                              </span>
+                              <span className="psc-stat" title="Avg scroll depth">
+                                <span className="psc-stat-icon">↕</span>
+                                {step.avgDepth != null ? `${step.avgDepth}%` : '—'}
+                              </span>
                             </div>
                           </div>
                           {j < p.steps.length - 1 && <span className="path-arrow">→</span>}
@@ -1212,12 +1210,15 @@ function SnippetPage({ partner }) {
 // ─── Settings page ────────────────────────────────────────────────────────────
 
 function SettingsPage({ partner, onDeleted }) {
-  const [showDelete, setShowDelete]   = useState(false);
-  const [timezone, setTimezone]       = useState(partner.timezone || 'UTC');
-  const [saving, setSaving]           = useState(false);
-  const [saved, setSaved]             = useState(false);
-  const [saveError, setSaveError]     = useState('');
-  const [currentTime, setCurrentTime] = useState(() => nowInTz(partner.timezone || 'UTC'));
+  const [showDelete, setShowDelete]     = useState(false);
+  const [showClear, setShowClear]       = useState(false);
+  const [clearing, setClearing]         = useState(false);
+  const [cleared, setCleared]           = useState(false);
+  const [timezone, setTimezone]         = useState(partner.timezone || 'UTC');
+  const [saving, setSaving]             = useState(false);
+  const [saved, setSaved]               = useState(false);
+  const [saveError, setSaveError]       = useState('');
+  const [currentTime, setCurrentTime]   = useState(() => nowInTz(partner.timezone || 'UTC'));
 
   // Live clock in partner's timezone
   useEffect(() => {
@@ -1238,10 +1239,17 @@ function SettingsPage({ partner, onDeleted }) {
     if (error) { setSaveError(error.message); }
     else {
       setSaved(true);
-      // Patch the in-memory partner object so the rest of the session reflects the change
       partner.timezone = timezone;
       setTimeout(() => setSaved(false), 3000);
     }
+  }
+
+  async function handleClearData() {
+    setClearing(true);
+    const { error } = await clearPartnerData(partner.id);
+    setClearing(false);
+    if (error) { alert('Clear failed: ' + error.message); }
+    else { setCleared(true); setShowClear(false); }
   }
 
   async function handleDelete() {
@@ -1264,7 +1272,6 @@ function SettingsPage({ partner, onDeleted }) {
       <div className="settings-group">
         <h4 className="settings-label">Timezone</h4>
         <p className="settings-sub">Sets how timestamps are displayed across this partner's dashboard. The tracker always records in UTC — this is display only.</p>
-
         <div className="tz-picker-row">
           <select
             className="field-input tz-select"
@@ -1283,9 +1290,7 @@ function SettingsPage({ partner, onDeleted }) {
             {saving ? <span className="spinner" /> : saved ? '✓ Saved' : 'Save'}
           </button>
         </div>
-
         {saveError && <div className="login-error" style={{ marginTop: 10 }}>{saveError}</div>}
-
         <div className="tz-clock-row">
           <span className="tz-clock-label">Current time in {tzLabel}</span>
           <span className="tz-clock">{currentTime}</span>
@@ -1294,16 +1299,44 @@ function SettingsPage({ partner, onDeleted }) {
 
       <div className="settings-group danger-zone">
         <h4 className="settings-label danger">Danger zone</h4>
-        <p className="settings-warn">Deleting a partner removes all associated event data permanently. This cannot be undone.</p>
-        {!showDelete ? (
-          <button className="btn-danger" onClick={() => setShowDelete(true)}>Delete partner</button>
-        ) : (
-          <div className="confirm-row">
-            <span>Are you sure?</span>
-            <button className="btn-ghost" onClick={() => setShowDelete(false)}>Cancel</button>
-            <button className="btn-danger" onClick={handleDelete}>Yes, delete</button>
+
+        {/* Clear data */}
+        <div className="danger-action">
+          <div className="danger-action-info">
+            <span className="danger-action-title">Clear all data</span>
+            <span className="danger-action-desc">Deletes all events, sessions, and conversion records for this partner. Goals, form definitions, and settings are kept. Use this to wipe test data before launch.</span>
           </div>
-        )}
+          {cleared ? (
+            <span className="danger-cleared">✓ Data cleared</span>
+          ) : !showClear ? (
+            <button className="btn-danger" onClick={() => setShowClear(true)}>Clear data</button>
+          ) : (
+            <div className="confirm-row">
+              <span>Wipe all analytics data?</span>
+              <button className="btn-ghost" onClick={() => setShowClear(false)}>Cancel</button>
+              <button className="btn-danger" onClick={handleClearData} disabled={clearing}>
+                {clearing ? <span className="spinner" /> : 'Yes, clear'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Delete partner */}
+        <div className="danger-action" style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+          <div className="danger-action-info">
+            <span className="danger-action-title">Delete partner</span>
+            <span className="danger-action-desc">Permanently removes the partner and all associated data. This cannot be undone.</span>
+          </div>
+          {!showDelete ? (
+            <button className="btn-danger" onClick={() => setShowDelete(true)}>Delete partner</button>
+          ) : (
+            <div className="confirm-row">
+              <span>Are you sure?</span>
+              <button className="btn-ghost" onClick={() => setShowDelete(false)}>Cancel</button>
+              <button className="btn-danger" onClick={handleDelete}>Yes, delete</button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

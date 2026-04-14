@@ -1024,3 +1024,10 @@ select.field-input { cursor: pointer; }
 .tz-clock-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); }
 .tz-clock-label { font-size: 0.82rem; color: var(--text2); }
 .tz-clock { font-family: var(--mono); font-size: 1rem; font-weight: 600; color: var(--accent-1); letter-spacing: 0.04em; }
+
+/* ── Danger zone actions ─────────────────────────────────────────────────────── */
+.danger-action { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.danger-action-info { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.danger-action-title { font-size: 0.9rem; font-weight: 500; color: var(--text); }
+.danger-action-desc { font-size: 0.82rem; color: var(--text2); line-height: 1.5; }
+.danger-cleared { font-size: 0.85rem; color: var(--green); font-weight: 500; white-space: nowrap; padding-top: 6px; }

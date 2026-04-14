@@ -45,6 +45,32 @@ export async function createPartner({ name, domain }) {
   return { data, error };
 }
 
+// Deletes all collected data for a partner without removing the partner,
+// goals, form definitions, or settings. Safe to use before a site relaunch
+// or to wipe test data. Runs deletes sequentially so FK constraints are
+// respected — conversion_events before sessions before events.
+export async function clearPartnerData(id) {
+  const tables = [
+    'conversion_events',
+    'form_submit_actions',
+    'form_versions',
+    'form_definitions',
+    'conversion_goals',
+    'sessions',
+    'events',
+  ];
+  // We delete in an order that respects foreign keys:
+  // child rows first, then parent rows.
+  // Note: form_definitions references clients; form_versions references form_definitions.
+  // We preserve form_definitions and goals (config), only wipe data tables.
+  const dataTables = ['conversion_events', 'sessions', 'events'];
+  for (const table of dataTables) {
+    const { error } = await supabase.from(table).delete().eq('client_id', id);
+    if (error) return { error };
+  }
+  return { error: null };
+}
+
 export async function updatePartner(id, { name, domain, timezone }) {
   const { data, error } = await supabase
     .from('clients')

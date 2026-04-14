@@ -39,10 +39,11 @@ export async function getFormVersions(formId) {
 // ── Form funnel ───────────────────────────────────────────────────────────────
 
 export async function getFormFunnel(formVersionId) {
+  // We need the form_id (from form_versions) to check submit actions
   const [versionRes, fieldsRes, summaryRes] = await Promise.all([
     supabase
       .from('form_versions')
-      .select('fields')
+      .select('fields, form_id')
       .eq('id', formVersionId)
       .single(),
     supabase
@@ -60,6 +61,22 @@ export async function getFormFunnel(formVersionId) {
   const summary = summaryRes.data || { sessions_started: 0, sessions_submitted: 0, sessions_abandoned: 0 };
   const statsRows = fieldsRes.data || [];
   const canonicalFields = versionRes.data?.fields || [];
+  const formId = versionRes.data?.form_id;
+
+  // If this form has no submit actions configured, we cannot reliably detect
+  // submissions — zero them out so the funnel doesn't show misleading data.
+  if (formId) {
+    const { data: actions } = await supabase
+      .from('form_submit_actions')
+      .select('id')
+      .eq('form_id', formId)
+      .eq('active', true)
+      .limit(1);
+    if (!actions || actions.length === 0) {
+      summary.sessions_submitted = 0;
+      summary.sessions_abandoned = summary.sessions_started;
+    }
+  }
 
   // Build a lookup of stats by field name
   const statsMap = {};
@@ -79,7 +96,6 @@ export async function getFormFunnel(formVersionId) {
       avg_fill_seconds: statsMap[f.name || f.field_name]?.avg_fill_seconds ?? null,
     }));
   } else {
-    // Fallback to stats rows if no version snapshot available
     fields = statsRows.map(r => ({ ...r, required: false }));
   }
 
