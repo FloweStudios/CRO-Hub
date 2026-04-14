@@ -506,6 +506,7 @@ select.field-input { cursor: pointer; }
 /* â”€â”€ Stat boxes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .stats-strip { display: grid; gap: 12px; margin-bottom: 20px; }
 .stats-strip.four  { grid-template-columns: repeat(4, 1fr); }
+.stats-strip.six   { grid-template-columns: repeat(6, 1fr); }
 .stats-strip.three { grid-template-columns: repeat(3, 1fr); }
 
 .stat-box {

@@ -441,11 +441,13 @@ function OverviewPage({ partner, filter }) {
 
   return (
     <div className="overview-content">
-      <div className="stats-strip four">
+      <div className="stats-strip six">
         <StatBox label="Conversions" value={fmt(data.conversions)} delta={data.conversionsDelta} highlight />
         <StatBox label="Conv rate" value={data.convRate + '%'} delta={data.convRateDelta} highlight />
         <StatBox label="Sessions" value={fmt(data.sessions)} delta={data.sessionsDelta} />
         <StatBox label="Pageviews" value={fmt(data.pageviews)} />
+        <StatBox label="Avg session length" value={data.avgSessionLengthMs != null ? fmtTime(Math.round(data.avgSessionLengthMs / 1000)) : '—'} />
+        <StatBox label="Avg scroll depth" value={data.avgScrollDepth != null ? `${data.avgScrollDepth}%` : '—'} />
       </div>
 
       <div className="chart-card">
@@ -857,7 +859,7 @@ function TopPagesPage({ partner, filter }) {
   const [pages, setPages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [device, setDevice] = useState(null);
-  const [sortCol, setSortCol] = useState('pageviews');
+  const [sortCol, setSortCol] = useState('sessions');
   const [sortDir, setSortDir] = useState('desc');
 
   useEffect(() => {
@@ -906,21 +908,21 @@ function TopPagesPage({ partner, filter }) {
         <div className="data-table">
           <div className="table-head">
             <span className="col-url">Page</span>
-            <SortTh col="pageviews" className="col-num">Pageviews</SortTh>
-            <SortTh col="sessions"  className="col-num">Sessions</SortTh>
-            <SortTh col="avgTime"   className="col-num">Avg time</SortTh>
-            <SortTh col="convRate"  className="col-num">Conv rate</SortTh>
-            <SortTh col="conversions" className="col-num">Convs</SortTh>
+            <SortTh col="sessions"      className="col-num">Sessions</SortTh>
+            <SortTh col="avgTime"       className="col-num">Avg time</SortTh>
+            <SortTh col="avgScrollDepth" className="col-num">Avg scroll</SortTh>
+            <SortTh col="conversions"   className="col-num">Convs</SortTh>
+            <SortTh col="convRate"      className="col-num">Conv rate</SortTh>
           </div>
           {sorted.length === 0 ? <div className="table-empty">No data for this period</div>
             : sorted.map((p, i) => (
               <div key={i} className="table-row">
                 <span className="col-url mono-sm">{p.url.replace(/^https?:\/\/[^/]+/, '') || '/'}</span>
-                <span className="col-num">{fmt(p.pageviews)}</span>
                 <span className="col-num">{fmt(p.sessions)}</span>
                 <span className="col-num">{p.avgTime != null ? fmtTime(p.avgTime) : '—'}</span>
-                <span className="col-num">{p.convRate}%</span>
+                <span className="col-num">{p.avgScrollDepth != null ? `${p.avgScrollDepth}%` : '—'}</span>
                 <span className="col-num">{fmt(p.conversions)}</span>
+                <span className="col-num">{p.convRate}%</span>
               </div>
             ))}
         </div>

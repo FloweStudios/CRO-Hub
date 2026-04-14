@@ -39,8 +39,7 @@ export async function getFormVersions(formId) {
 // ── Form funnel ───────────────────────────────────────────────────────────────
 
 export async function getFormFunnel(formVersionId) {
-  // We need the form_id (from form_versions) to check submit actions
-  const [versionRes, fieldsRes, summaryRes] = await Promise.all([
+  const [versionRes, fieldsRes, summaryRes, submitTimesRes] = await Promise.all([
     supabase
       .from('form_versions')
       .select('fields, form_id')
@@ -56,12 +55,25 @@ export async function getFormFunnel(formVersionId) {
       .select('*')
       .eq('form_version_id', formVersionId)
       .single(),
+    // Fetch total_form_time_ms from submitted sessions for avg completion time
+    supabase
+      .from('events')
+      .select('total_form_time_ms')
+      .eq('form_version_id', formVersionId)
+      .eq('type', 'form_submit')
+      .not('total_form_time_ms', 'is', null),
   ]);
 
   const summary = summaryRes.data || { sessions_started: 0, sessions_submitted: 0, sessions_abandoned: 0 };
   const statsRows = fieldsRes.data || [];
   const canonicalFields = versionRes.data?.fields || [];
   const formId = versionRes.data?.form_id;
+
+  // Avg completion time from form_submit events
+  const submitTimes = (submitTimesRes.data || []).map(r => r.total_form_time_ms).filter(Boolean);
+  const avgCompletionMs = submitTimes.length > 0
+    ? Math.round(submitTimes.reduce((a, b) => a + b, 0) / submitTimes.length)
+    : null;
 
   // If this form has no submit actions configured, we cannot reliably detect
   // submissions — zero them out so the funnel doesn't show misleading data.
@@ -99,7 +111,7 @@ export async function getFormFunnel(formVersionId) {
     fields = statsRows.map(r => ({ ...r, required: false }));
   }
 
-  return { fields, summary };
+  return { fields, summary, avgCompletionMs };
 }
 
 // ── Field transition times ────────────────────────────────────────────────────

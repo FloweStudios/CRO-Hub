@@ -537,7 +537,7 @@ function AddActionModal({ formId, clientId, onClose, onCreated }) {
 // ─── Form funnel visualisation ────────────────────────────────────────────────
 
 function FormFunnel({ funnel, transitions, version }) {
-  const { fields, summary } = funnel;
+  const { fields, summary, avgCompletionMs } = funnel;
   const started   = summary.sessions_started   || 0;
   const submitted = summary.sessions_submitted || 0;
   const abandoned = summary.sessions_abandoned || 0;
@@ -557,6 +557,7 @@ function FormFunnel({ funnel, transitions, version }) {
         <div className="funnel-stat"><span className="funnel-stat-val red">{abandoned}</span><span className="funnel-stat-label">Abandoned</span></div>
         <div className="funnel-stat"><span className="funnel-stat-val green">{successRate}%</span><span className="funnel-stat-label">Completion</span></div>
         <div className="funnel-stat"><span className="funnel-stat-val red">{abandonRate}%</span><span className="funnel-stat-label">Abandonment</span></div>
+        <div className="funnel-stat"><span className="funnel-stat-val">{avgCompletionMs != null ? fmtMs(avgCompletionMs) : '—'}</span><span className="funnel-stat-label">Avg fill time</span></div>
       </div>
 
       {fields.length === 0 ? (
