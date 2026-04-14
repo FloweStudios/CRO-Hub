@@ -20,6 +20,39 @@ export async function createFormDefinition({ clientId, name, selector, urlPatter
   return { data, error };
 }
 
+export async function clearFormData(formId, clientId) {
+  // Get all version IDs for this form so we can scope the events delete
+  const { data: versions } = await supabase
+    .from('form_versions')
+    .select('id')
+    .eq('form_id', formId);
+
+  const versionIds = (versions || []).map(v => v.id);
+
+  // Delete events tied to these form versions (form_field, form_submit, form_scan)
+  if (versionIds.length > 0) {
+    const since = '2020-01-01T00:00:00.000Z';
+    const until = new Date(Date.now() + 86400000).toISOString();
+    const { error: evErr } = await supabase
+      .from('events')
+      .delete()
+      .eq('client_id', clientId)
+      .in('form_version_id', versionIds)
+      .gte('created_at', since)
+      .lte('created_at', until);
+    if (evErr) return { error: evErr };
+  }
+
+  // Delete form_versions (resets all field stats and session summaries)
+  const { error: verErr } = await supabase
+    .from('form_versions')
+    .delete()
+    .eq('form_id', formId);
+  if (verErr) return { error: verErr };
+
+  return { error: null };
+}
+
 export async function deleteFormDefinition(id) {
   const { error } = await supabase.from('form_definitions').delete().eq('id', id);
   return { error };

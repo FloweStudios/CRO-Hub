@@ -213,9 +213,12 @@ export async function getTopPages(clientId, filter = {}, device = null) {
   const pages = {};
   events.forEach(ev => {
     const url = ev.url.replace(/\?.*/, '');
-    if (!pages[url]) pages[url] = { url, sessions: new Set(), totalTime: 0, timeCount: 0, depths: [], conversions: 0 };
+    if (!pages[url]) pages[url] = { url, sessions: new Set(), sessionTimes: {}, depths: [], conversions: 0 };
     if (ev.type === 'pageview') { pages[url].sessions.add(ev.session_id); }
-    if (ev.type === 'time_on_page' && ev.time_on_page_ms) { pages[url].totalTime += ev.time_on_page_ms; pages[url].timeCount++; }
+    // Sum time chunks per session so avg reflects total time per session, not chunk size
+    if (ev.type === 'time_on_page' && ev.time_on_page_ms) {
+      pages[url].sessionTimes[ev.session_id] = (pages[url].sessionTimes[ev.session_id] || 0) + ev.time_on_page_ms;
+    }
     if (ev.type === 'scroll_depth' && ev.depth_pct) { pages[url].depths.push(ev.depth_pct); }
   });
   convEvents.forEach(ce => {
@@ -223,14 +226,20 @@ export async function getTopPages(clientId, filter = {}, device = null) {
     if (pages[url]) pages[url].conversions++;
   });
 
-  return Object.values(pages).map(p => ({
-    url: p.url,
-    sessions: p.sessions.size,
-    avgTime: p.timeCount > 0 ? Math.round(p.totalTime / p.timeCount / 1000) : null,
-    avgScrollDepth: p.depths.length > 0 ? Math.round(p.depths.reduce((a, b) => a + b, 0) / p.depths.length) : null,
-    conversions: p.conversions,
-    convRate: p.sessions.size > 0 ? (p.conversions / p.sessions.size * 100).toFixed(1) : '0.0',
-  })).sort((a, b) => b.sessions - a.sessions).slice(0, 20);
+  return Object.values(pages).map(p => {
+    const sessionTimeValues = Object.values(p.sessionTimes);
+    const avgTime = sessionTimeValues.length > 0
+      ? Math.round(sessionTimeValues.reduce((a, b) => a + b, 0) / sessionTimeValues.length / 1000)
+      : null;
+    return {
+      url: p.url,
+      sessions: p.sessions.size,
+      avgTime,
+      avgScrollDepth: p.depths.length > 0 ? Math.round(p.depths.reduce((a, b) => a + b, 0) / p.depths.length) : null,
+      conversions: p.conversions,
+      convRate: p.sessions.size > 0 ? (p.conversions / p.sessions.size * 100).toFixed(1) : '0.0',
+    };
+  }).sort((a, b) => b.sessions - a.sessions).slice(0, 20);
 }
 
 // ── Sources ───────────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  getFormDefinitions, createFormDefinition, deleteFormDefinition,
+  getFormDefinitions, createFormDefinition, deleteFormDefinition, clearFormData,
   getFormVersions, getFormFunnel, getFieldTransitionTimes,
   getFormSessions, deleteFormSession,
   getFormSubmitActions, createFormSubmitAction, deleteFormSubmitAction, toggleFormSubmitAction,
@@ -136,18 +136,37 @@ function FormDetail({ form, clientId, timezone }) {
   const [activeVersionId, setActiveVersionId] = useState(null);
   const [tab, setTab]                     = useState('funnel');
   const [loading, setLoading]             = useState(true);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearing, setClearing]           = useState(false);
+  const [cleared, setCleared]             = useState(false);
 
-  useEffect(() => {
+  const loadVersions = useCallback(() => {
     setLoading(true);
     getFormVersions(form.id).then(({ data }) => {
       setVersions(data);
       if (data.length > 0) {
         const current = data.find(v => v.is_current) || data[0];
         setActiveVersionId(current.id);
+      } else {
+        setActiveVersionId(null);
       }
       setLoading(false);
     });
   }, [form.id]);
+
+  useEffect(() => { loadVersions(); }, [loadVersions]);
+
+  async function handleClearData() {
+    setClearing(true);
+    const { error } = await clearFormData(form.id, clientId);
+    setClearing(false);
+    if (error) { alert('Clear failed: ' + error.message); return; }
+    setShowClearConfirm(false);
+    setCleared(true);
+    setVersions([]);
+    setActiveVersionId(null);
+    setTimeout(() => setCleared(false), 4000);
+  }
 
   const activeVersion = versions.find(v => v.id === activeVersionId);
 
@@ -157,14 +176,34 @@ function FormDetail({ form, clientId, timezone }) {
     return (
       <div className="empty-state">
         <div className="empty-icon">◎</div>
-        <h3>No data yet for "{form.name}"</h3>
-        <p>Once visitors interact with <code>{form.selector}</code> the analytics will appear here.</p>
+        <h3>{cleared ? 'Data cleared' : `No data yet for "${form.name}"`}</h3>
+        <p>{cleared ? 'All analytics data for this form has been removed.' : `Once visitors interact with `}<code>{!cleared && form.selector}</code>{!cleared && ' the analytics will appear here.'}</p>
       </div>
     );
   }
 
   return (
     <div className="form-detail">
+      {showClearConfirm && (
+        <div className="modal-backdrop" onClick={() => setShowClearConfirm(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Clear form data?</h3>
+              <button className="modal-close" onClick={() => setShowClearConfirm(false)}>✕</button>
+            </div>
+            <p style={{ color: 'var(--text2)', fontSize: '0.9rem', lineHeight: 1.6, marginBottom: 8 }}>
+              This will permanently delete all events, sessions, and field stats for <strong style={{ color: 'var(--text)' }}>{form.name}</strong>. The form definition and submit triggers are kept. This cannot be undone.
+            </p>
+            <div className="modal-actions">
+              <button className="btn-ghost" onClick={() => setShowClearConfirm(false)}>Cancel</button>
+              <button className="btn-danger" onClick={handleClearData} disabled={clearing}>
+                {clearing ? <span className="spinner" /> : 'Yes, clear data'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="form-detail-header">
         <div>
           <span className="form-detail-name">{form.name}</span>
@@ -185,6 +224,9 @@ function FormDetail({ form, clientId, timezone }) {
               </select>
             </div>
           )}
+          <button className="btn-ghost btn-sm" style={{ color: 'var(--red)', borderColor: 'var(--red)' }} onClick={() => setShowClearConfirm(true)}>
+            Clear data
+          </button>
         </div>
       </div>
 
