@@ -206,8 +206,12 @@ export async function getTopPages(clientId, filter = {}, device = null) {
     supabase.from('conversion_events').select('url, session_id').eq('client_id', clientId).gte('created_at', since).lte('created_at', until),
   ]);
 
-  const events     = (evRes.data   || []).filter(e => sessionIds.has(e.session_id));
-  const convEvents = (convRes.data || []).filter(c => sessionIds.has(c.session_id));
+  const events = (sources?.length || mediums?.length)
+    ? (evRes.data || []).filter(e => sessionIds.has(e.session_id))
+    : (evRes.data || []);
+  const convEvents = (sources?.length || mediums?.length)
+    ? (convRes.data || []).filter(c => sessionIds.has(c.session_id))
+    : (convRes.data || []);
   if (!events.length) return [];
 
   function normUrl(raw) {
