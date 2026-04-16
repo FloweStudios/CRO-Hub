@@ -210,29 +210,24 @@ export async function getTopPages(clientId, filter = {}, device = null) {
   const convEvents = (convRes.data || []).filter(c => sessionIds.has(c.session_id));
   if (!events.length) return [];
 
-  // Normalise URL to path only, strip trailing slash, lowercase
   function normUrl(raw) {
     try {
       const u = new URL(raw);
-      let p = (u.pathname + u.search).replace(/\?.*/, '').replace(/\/+$/, '') || '/';
-      return p.toLowerCase();
-    } catch { return raw.replace(/\?.*/, '').replace(/\/+$/, '').toLowerCase() || '/'; }
+      return (u.pathname.replace(/\/+$/, '') || '/').toLowerCase();
+    } catch { return raw.replace(/^https?:\/\/[^/]+/, '').replace(/\?.*/, '').replace(/\/+$/, '').toLowerCase() || '/'; }
   }
 
   const pages = {};
   events.forEach(ev => {
     const url = normUrl(ev.url);
     if (!pages[url]) pages[url] = { url, pageviews: 0, sessionTimes: {}, depths: {}, conversions: 0 };
-    if (ev.type === 'pageview') { pages[url].pageviews++; }
-    if (ev.type === 'time_on_page' && ev.time_on_page_ms) {
+    if (ev.type === 'pageview') pages[url].pageviews++;
+    if (ev.type === 'time_on_page' && ev.time_on_page_ms)
       pages[url].sessionTimes[ev.session_id] = (pages[url].sessionTimes[ev.session_id] || 0) + ev.time_on_page_ms;
-    }
-    if (ev.type === 'scroll_depth' && ev.depth_pct) {
+    if (ev.type === 'scroll_depth' && ev.depth_pct)
       pages[url].depths[ev.session_id] = Math.max(pages[url].depths[ev.session_id] || 0, ev.depth_pct);
-    }
   });
 
-  // Count all conversions by page — create entry if no pageview recorded yet
   convEvents.forEach(ce => {
     const url = normUrl(ce.url);
     if (!pages[url]) pages[url] = { url, pageviews: 0, sessionTimes: {}, depths: {}, conversions: 0 };
@@ -242,13 +237,10 @@ export async function getTopPages(clientId, filter = {}, device = null) {
   return Object.values(pages).map(p => {
     const sessionTimeValues = Object.values(p.sessionTimes);
     const depthValues = Object.values(p.depths);
-    const avgTime = sessionTimeValues.length > 0
-      ? Math.round(sessionTimeValues.reduce((a, b) => a + b, 0) / sessionTimeValues.length / 1000)
-      : null;
     return {
       url: p.url,
       pageviews: p.pageviews,
-      avgTime,
+      avgTime: sessionTimeValues.length > 0 ? Math.round(sessionTimeValues.reduce((a, b) => a + b, 0) / sessionTimeValues.length / 1000) : null,
       avgScrollDepth: depthValues.length > 0 ? Math.round(depthValues.reduce((a, b) => a + b, 0) / depthValues.length) : null,
       conversions: p.conversions,
       convRate: p.pageviews > 0 ? (p.conversions / p.pageviews * 100).toFixed(1) : '0.0',
