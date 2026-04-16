@@ -213,32 +213,44 @@ export async function getTopPages(clientId, filter = {}, device = null) {
   const pages = {};
   events.forEach(ev => {
     const url = ev.url.replace(/\?.*/, '');
-    if (!pages[url]) pages[url] = { url, pageviews: 0, sessions: new Set(), sessionTimes: {}, depths: [], conversions: 0 };
+    if (!pages[url]) pages[url] = { url, pageviews: 0, sessions: new Set(), sessionTimes: {}, depths: {} };
     if (ev.type === 'pageview') { pages[url].pageviews++; pages[url].sessions.add(ev.session_id); }
     if (ev.type === 'time_on_page' && ev.time_on_page_ms) {
       pages[url].sessionTimes[ev.session_id] = (pages[url].sessionTimes[ev.session_id] || 0) + ev.time_on_page_ms;
     }
-    if (ev.type === 'scroll_depth' && ev.depth_pct) { pages[url].depths.push(ev.depth_pct); }
+    if (ev.type === 'scroll_depth' && ev.depth_pct) {
+      pages[url].depths[ev.session_id] = Math.max(pages[url].depths[ev.session_id] || 0, ev.depth_pct);
+    }
   });
+
+  // Count conversions per page — only for sessions that had a pageview on that page.
+  // This prevents inflated counts from sessions where the conversion URL differs from
+  // the visited page URL, or where the pageview falls outside the date window.
+  const convSessionsByPage = {};
   convEvents.forEach(ce => {
     const url = ce.url.replace(/\?.*/, '');
-    if (pages[url]) pages[url].conversions++;
+    if (!convSessionsByPage[url]) convSessionsByPage[url] = new Set();
+    convSessionsByPage[url].add(ce.session_id);
   });
 
   return Object.values(pages).map(p => {
     const sessionTimeValues = Object.values(p.sessionTimes);
+    const depthValues = Object.values(p.depths);
     const avgTime = sessionTimeValues.length > 0
       ? Math.round(sessionTimeValues.reduce((a, b) => a + b, 0) / sessionTimeValues.length / 1000)
       : null;
+    // Only count conversions from sessions that actually visited this page
+    const convSessions = convSessionsByPage[p.url] || new Set();
+    const conversions = [...convSessions].filter(sid => p.sessions.has(sid)).length;
+    const sessionCount = p.sessions.size;
     return {
       url: p.url,
       pageviews: p.pageviews,
-      sessions: p.sessions.size,
+      sessions: sessionCount,
       avgTime,
-      avgScrollDepth: p.depths.length > 0 ? Math.round(p.depths.reduce((a, b) => a + b, 0) / p.depths.length) : null,
-      conversions: p.conversions,
-      // Conv rate uses pageviews as denominator — more accurate for pages with multiple visits per session
-      convRate: p.pageviews > 0 ? (p.conversions / p.pageviews * 100).toFixed(1) : '0.0',
+      avgScrollDepth: depthValues.length > 0 ? Math.round(depthValues.reduce((a, b) => a + b, 0) / depthValues.length) : null,
+      conversions,
+      convRate: sessionCount > 0 ? (conversions / sessionCount * 100).toFixed(1) : '0.0',
     };
   }).sort((a, b) => b.pageviews - a.pageviews);
 }
