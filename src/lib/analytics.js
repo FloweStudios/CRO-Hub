@@ -213,9 +213,8 @@ export async function getTopPages(clientId, filter = {}, device = null) {
   const pages = {};
   events.forEach(ev => {
     const url = ev.url.replace(/\?.*/, '');
-    if (!pages[url]) pages[url] = { url, sessions: new Set(), sessionTimes: {}, depths: [], conversions: 0 };
-    if (ev.type === 'pageview') { pages[url].sessions.add(ev.session_id); }
-    // Sum time chunks per session so avg reflects total time per session, not chunk size
+    if (!pages[url]) pages[url] = { url, pageviews: 0, sessions: new Set(), sessionTimes: {}, depths: [], conversions: 0 };
+    if (ev.type === 'pageview') { pages[url].pageviews++; pages[url].sessions.add(ev.session_id); }
     if (ev.type === 'time_on_page' && ev.time_on_page_ms) {
       pages[url].sessionTimes[ev.session_id] = (pages[url].sessionTimes[ev.session_id] || 0) + ev.time_on_page_ms;
     }
@@ -233,13 +232,15 @@ export async function getTopPages(clientId, filter = {}, device = null) {
       : null;
     return {
       url: p.url,
+      pageviews: p.pageviews,
       sessions: p.sessions.size,
       avgTime,
       avgScrollDepth: p.depths.length > 0 ? Math.round(p.depths.reduce((a, b) => a + b, 0) / p.depths.length) : null,
       conversions: p.conversions,
-      convRate: p.sessions.size > 0 ? (p.conversions / p.sessions.size * 100).toFixed(1) : '0.0',
+      // Conv rate uses pageviews as denominator — more accurate for pages with multiple visits per session
+      convRate: p.pageviews > 0 ? (p.conversions / p.pageviews * 100).toFixed(1) : '0.0',
     };
-  }).sort((a, b) => b.sessions - a.sessions);
+  }).sort((a, b) => b.pageviews - a.pageviews);
 }
 
 // ── Sources ───────────────────────────────────────────────────────────────────

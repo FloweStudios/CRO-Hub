@@ -298,6 +298,13 @@ function PartnerShell({ partner, page, onBack, onDeleted }) {
   const [showSrcPicker, setShowSrcPicker] = useState(false);
 
   // Load available sources for this partner so we can populate the picker
+  const [earliestDate, setEarliestDate] = useState('');
+  useEffect(() => {
+    if (noFilter) return;
+    supabase.from('sessions').select('created_at').eq('client_id', partner.id).order('created_at', { ascending: true }).limit(1)
+      .then(({ data }) => { if (data?.[0]) setEarliestDate(data[0].created_at.slice(0, 10)); });
+  }, [partner.id]); // eslint-disable-line
+
   useEffect(() => {
     if (noFilter) return;
     getSources(partner.id, { dateFrom, dateTo }).then(rows => {
@@ -341,7 +348,7 @@ function PartnerShell({ partner, page, onBack, onDeleted }) {
           {/* Date range */}
           <div className="gf-group">
             <span className="gf-label">Range</span>
-            <input type="date" className="gf-date-input" value={dateFrom} max={dateTo} onChange={e => setDateFrom(e.target.value)} />
+            <input type="date" className="gf-date-input" value={dateFrom} min={earliestDate || undefined} max={dateTo} onChange={e => setDateFrom(e.target.value)} />
             <span className="gf-sep">→</span>
             <input type="date" className="gf-date-input" value={dateTo} min={dateFrom} max={todayStr()} onChange={e => setDateTo(e.target.value)} />
           </div>
@@ -908,7 +915,7 @@ function TopPagesPage({ partner, filter }) {
   const [pages, setPages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [device, setDevice] = useState(null);
-  const [sortCol, setSortCol] = useState('sessions');
+  const [sortCol, setSortCol] = useState('pageviews');
   const [sortDir, setSortDir] = useState('desc');
 
   useEffect(() => {
@@ -957,7 +964,7 @@ function TopPagesPage({ partner, filter }) {
         <div className="data-table">
           <div className="table-head">
             <span className="col-url">Page</span>
-            <SortTh col="sessions"      className="col-num">Sessions</SortTh>
+            <SortTh col="pageviews"     className="col-num">Pageviews</SortTh>
             <SortTh col="avgTime"       className="col-num">Avg time</SortTh>
             <SortTh col="avgScrollDepth" className="col-num">Avg scroll</SortTh>
             <SortTh col="conversions"   className="col-num">Convs</SortTh>
@@ -967,7 +974,7 @@ function TopPagesPage({ partner, filter }) {
             : sorted.map((p, i) => (
               <div key={i} className="table-row">
                 <span className="col-url mono-sm">{p.url.replace(/^https?:\/\/[^/]+/, '') || '/'}</span>
-                <span className="col-num">{fmt(p.sessions)}</span>
+                <span className="col-num">{fmt(p.pageviews)}</span>
                 <span className="col-num">{p.avgTime != null ? fmtTime(p.avgTime) : '—'}</span>
                 <span className="col-num">{p.avgScrollDepth != null ? `${p.avgScrollDepth}%` : '—'}</span>
                 <span className="col-num">{fmt(p.conversions)}</span>
@@ -1270,7 +1277,14 @@ function SettingsPage({ partner, onDeleted }) {
   const [saveError, setSaveError]       = useState('');
   const [currentTime, setCurrentTime]   = useState(() => nowInTz(partner.timezone || 'UTC'));
 
-  // Live clock in partner's timezone
+  // Partner details editing
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [editName, setEditName]         = useState(partner.name);
+  const [editDomain, setEditDomain]     = useState(partner.domain);
+  const [confirmDetails, setConfirmDetails] = useState(false);
+  const [savingDetails, setSavingDetails]   = useState(false);
+  const [detailsError, setDetailsError]     = useState('');
+
   useEffect(() => {
     const tz = timezone || 'UTC';
     setCurrentTime(nowInTz(tz));
@@ -1280,18 +1294,21 @@ function SettingsPage({ partner, onDeleted }) {
 
   async function handleSaveTimezone() {
     setSaving(true); setSaveError(''); setSaved(false);
-    const { error } = await updatePartner(partner.id, {
-      name: partner.name,
-      domain: partner.domain,
-      timezone,
-    });
+    const { error } = await updatePartner(partner.id, { name: partner.name, domain: partner.domain, timezone });
     setSaving(false);
     if (error) { setSaveError(error.message); }
-    else {
-      setSaved(true);
-      partner.timezone = timezone;
-      setTimeout(() => setSaved(false), 3000);
-    }
+    else { setSaved(true); partner.timezone = timezone; setTimeout(() => setSaved(false), 3000); }
+  }
+
+  async function handleSaveDetails() {
+    setSavingDetails(true); setDetailsError('');
+    const { error } = await updatePartner(partner.id, { name: editName.trim(), domain: editDomain.trim(), timezone });
+    setSavingDetails(false);
+    if (error) { setDetailsError(error.message); return; }
+    partner.name = editName.trim();
+    partner.domain = editDomain.trim();
+    setConfirmDetails(false);
+    setEditingDetails(false);
   }
 
   async function handleClearData() {
@@ -1313,10 +1330,41 @@ function SettingsPage({ partner, onDeleted }) {
     <div className="settings-section">
       <div className="settings-group">
         <h4 className="settings-label">Partner details</h4>
-        <div className="settings-row"><span className="settings-key">Name</span><span className="settings-val">{partner.name}</span></div>
-        <div className="settings-row"><span className="settings-key">Domain</span><span className="settings-val mono">{partner.domain}</span></div>
-        <div className="settings-row"><span className="settings-key">Partner ID</span><span className="settings-val mono">{partner.id}</span></div>
-        <div className="settings-row"><span className="settings-key">Created</span><span className="settings-val">{new Date(partner.created_at).toLocaleDateString()}</span></div>
+        {editingDetails ? (
+          <>
+            <div className="field" style={{ marginBottom: 12 }}>
+              <label className="field-label">Name</label>
+              <input className="field-input" value={editName} onChange={e => setEditName(e.target.value)} />
+            </div>
+            <div className="field" style={{ marginBottom: 12 }}>
+              <label className="field-label">Domain</label>
+              <input className="field-input mono" value={editDomain} onChange={e => setEditDomain(e.target.value)} placeholder="example.com" />
+            </div>
+            {detailsError && <div className="login-error" style={{ marginBottom: 10 }}>{detailsError}</div>}
+            {confirmDetails ? (
+              <div className="confirm-row">
+                <span style={{ color: 'var(--text2)', fontSize: '0.88rem' }}>Save changes to name and domain?</span>
+                <button className="btn-ghost" onClick={() => setConfirmDetails(false)}>Back</button>
+                <button className="btn-primary" onClick={handleSaveDetails} disabled={savingDetails}>
+                  {savingDetails ? <span className="spinner" /> : 'Confirm'}
+                </button>
+              </div>
+            ) : (
+              <div className="confirm-row">
+                <button className="btn-ghost" onClick={() => { setEditingDetails(false); setEditName(partner.name); setEditDomain(partner.domain); setDetailsError(''); }}>Cancel</button>
+                <button className="btn-primary" onClick={() => setConfirmDetails(true)} disabled={!editName.trim() || !editDomain.trim()}>Save changes</button>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="settings-row"><span className="settings-key">Name</span><span className="settings-val">{partner.name}</span></div>
+            <div className="settings-row"><span className="settings-key">Domain</span><span className="settings-val mono">{partner.domain}</span></div>
+            <div className="settings-row"><span className="settings-key">Partner ID</span><span className="settings-val mono">{partner.id}</span></div>
+            <div className="settings-row"><span className="settings-key">Created</span><span className="settings-val">{new Date(partner.created_at).toLocaleDateString()}</span></div>
+            <button className="btn-ghost btn-sm" style={{ marginTop: 10 }} onClick={() => setEditingDetails(true)}>Edit name / domain</button>
+          </>
+        )}
       </div>
 
       <div className="settings-group">
