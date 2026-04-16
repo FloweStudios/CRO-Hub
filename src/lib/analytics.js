@@ -239,7 +239,7 @@ export async function getTopPages(clientId, filter = {}, device = null) {
       conversions: p.conversions,
       convRate: p.sessions.size > 0 ? (p.conversions / p.sessions.size * 100).toFixed(1) : '0.0',
     };
-  }).sort((a, b) => b.sessions - a.sessions).slice(0, 20);
+  }).sort((a, b) => b.sessions - a.sessions);
 }
 
 // ── Sources ───────────────────────────────────────────────────────────────────
@@ -249,12 +249,19 @@ export async function getTopPages(clientId, filter = {}, device = null) {
 export async function getSources(clientId, filter = {}) {
   const { since, until } = resolveRange(filter);
 
-  const [sessRes, convRes] = await Promise.all([
+  const [sessRes, convRes, timeRes] = await Promise.all([
     supabase.from('sessions').select('session_id, utm_source, utm_medium, referrer_url').eq('client_id', clientId).gte('created_at', since).lte('created_at', until),
     supabase.from('conversion_events').select('session_id').eq('client_id', clientId).gte('created_at', since).lte('created_at', until),
+    supabase.from('events').select('session_id, time_on_page_ms').eq('client_id', clientId).eq('type', 'time_on_page').gte('created_at', since).lte('created_at', until),
   ]);
 
   if (!sessRes.data) return [];
+
+  // Sum time chunks per session
+  const sessionTotalTime = {};
+  (timeRes.data || []).forEach(ev => {
+    if (ev.time_on_page_ms) sessionTotalTime[ev.session_id] = (sessionTotalTime[ev.session_id] || 0) + ev.time_on_page_ms;
+  });
 
   const convCountBySession = {};
   (convRes.data || []).forEach(c => {
@@ -274,13 +281,17 @@ export async function getSources(clientId, filter = {}) {
       } catch { source = 'Referral'; medium = 'referral'; }
     }
     const key = source + '|' + medium;
-    if (!sourceMap[key]) sourceMap[key] = { source, medium, sessions: 0, conversions: 0 };
+    if (!sourceMap[key]) sourceMap[key] = { source, medium, sessions: 0, conversions: 0, totalTimeMs: 0, timeSessions: 0 };
     sourceMap[key].sessions++;
     sourceMap[key].conversions += (convCountBySession[s.session_id] || 0);
+    const t = sessionTotalTime[s.session_id];
+    if (t) { sourceMap[key].totalTimeMs += t; sourceMap[key].timeSessions++; }
   });
 
   return Object.values(sourceMap).map(s => ({
-    ...s,
+    source: s.source, medium: s.medium, sessions: s.sessions,
+    avgSessionLengthMs: s.timeSessions > 0 ? Math.round(s.totalTimeMs / s.timeSessions) : null,
+    conversions: s.conversions,
     convRate: s.sessions > 0 ? (s.conversions / s.sessions * 100).toFixed(1) : '0.0',
   })).sort((a, b) => b.sessions - a.sessions);
 }
@@ -313,10 +324,11 @@ export async function getConversionPaths(clientId, filter = {}) {
   events.forEach(ev => {
     if (!sessionData[ev.session_id]) sessionData[ev.session_id] = {};
     const path = ev.url.replace(/^https?:\/\/[^/]+/, '').replace(/\?.*/, '') || '/';
-    if (!sessionData[ev.session_id][path]) sessionData[ev.session_id][path] = { path, order: null, timeMs: null, maxDepth: null };
+    if (!sessionData[ev.session_id][path]) sessionData[ev.session_id][path] = { path, order: null, timeMs: 0, hasTime: false, maxDepth: null };
     const step = sessionData[ev.session_id][path];
     if (ev.type === 'pageview' && step.order === null) step.order = new Date(ev.ts).getTime();
-    if (ev.type === 'time_on_page' && ev.time_on_page_ms) step.timeMs = ev.time_on_page_ms;
+    // Sum chunks so total session time on this page is correct (not just last 2s chunk)
+    if (ev.type === 'time_on_page' && ev.time_on_page_ms) { step.timeMs += ev.time_on_page_ms; step.hasTime = true; }
     if (ev.type === 'scroll_depth' && ev.depth_pct) step.maxDepth = Math.max(step.maxDepth || 0, ev.depth_pct);
   });
 
@@ -332,7 +344,7 @@ export async function getConversionPaths(clientId, filter = {}) {
     pathMap[key].count++;
     steps.forEach((s, i) => {
       if (pathMap[key].steps[i]) {
-        if (s.timeMs != null) pathMap[key].steps[i].times.push(s.timeMs);
+        if (s.hasTime) pathMap[key].steps[i].times.push(s.timeMs);
         if (s.maxDepth != null) pathMap[key].steps[i].depths.push(s.maxDepth);
       }
     });
@@ -372,22 +384,32 @@ export async function getPageInfluence(clientId, filter = {}) {
 
   const pageMap = {};
   const seen = new Set();
+  const sessionPageTime = {}; // session|path -> accumulated ms
   events.forEach(ev => {
     const path = ev.url.replace(/^https?:\/\/[^/]+/, '').replace(/\?.*/, '') || '/';
-    if (!pageMap[path]) pageMap[path] = { path, sessions: 0, times: [], depths: [] };
+    if (!pageMap[path]) pageMap[path] = { path, sessions: 0, sessionTimes: {}, depths: [] };
     const key = ev.session_id + '|' + path;
     if (ev.type === 'pageview' && !seen.has(key)) { seen.add(key); pageMap[path].sessions++; }
-    if (ev.type === 'time_on_page' && ev.time_on_page_ms) pageMap[path].times.push(ev.time_on_page_ms);
+    // Sum chunks per session per page so avg reflects total time, not chunk size
+    if (ev.type === 'time_on_page' && ev.time_on_page_ms) {
+      pageMap[path].sessionTimes[ev.session_id] = (pageMap[path].sessionTimes[ev.session_id] || 0) + ev.time_on_page_ms;
+    }
     if (ev.type === 'scroll_depth' && ev.depth_pct) pageMap[path].depths.push(ev.depth_pct);
   });
 
   const total = sessionIds.length;
-  return Object.values(pageMap).map(p => ({
-    path: p.path, sessions: p.sessions,
-    pct: total > 0 ? (p.sessions / total * 100) : 0,
-    avgTimeMs: p.times.length > 0 ? Math.round(p.times.reduce((a, b) => a + b, 0) / p.times.length) : null,
-    avgDepth:  p.depths.length > 0 ? Math.round(p.depths.reduce((a, b) => a + b, 0) / p.depths.length) : null,
-  })).sort((a, b) => b.sessions - a.sessions).slice(0, 30);
+  return Object.values(pageMap).map(p => {
+    const sessionTimeValues = Object.values(p.sessionTimes);
+    const avgTimeMs = sessionTimeValues.length > 0
+      ? Math.round(sessionTimeValues.reduce((a, b) => a + b, 0) / sessionTimeValues.length)
+      : null;
+    return {
+      path: p.path, sessions: p.sessions,
+      pct: total > 0 ? (p.sessions / total * 100) : 0,
+      avgTimeMs,
+      avgDepth: p.depths.length > 0 ? Math.round(p.depths.reduce((a, b) => a + b, 0) / p.depths.length) : null,
+    };
+  }).sort((a, b) => b.sessions - a.sessions).slice(0, 30);
 }
 
 // ── Session path (drilldown) ──────────────────────────────────────────────────

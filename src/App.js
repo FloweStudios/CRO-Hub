@@ -1000,13 +1000,11 @@ function SourcesPage({ partner, filter }) {
 
   const sorted = useMemo(() => {
     return [...sources].sort((a, b) => {
-      const av = typeof a[sortCol] === 'string' ? parseFloat(a[sortCol]) : (a[sortCol] ?? 0);
-      const bv = typeof b[sortCol] === 'string' ? parseFloat(b[sortCol]) : (b[sortCol] ?? 0);
+      const av = typeof a[sortCol] === 'string' ? parseFloat(a[sortCol]) : (a[sortCol] ?? -1);
+      const bv = typeof b[sortCol] === 'string' ? parseFloat(b[sortCol]) : (b[sortCol] ?? -1);
       return sortDir === 'desc' ? bv - av : av - bv;
     });
   }, [sources, sortCol, sortDir]);
-
-  const maxSessions = useMemo(() => Math.max(...sorted.map(s => s.sessions), 1), [sorted]);
 
   function SortTh({ col, children, className }) {
     const active = sortCol === col;
@@ -1026,23 +1024,20 @@ function SourcesPage({ partner, filter }) {
       {loading ? <div className="loading-state"><div className="spinner lg" /></div> : (
         <div className="data-table">
           <div className="table-head">
-            <SortTh col="source"      className="col-source">Source</SortTh>
-            <SortTh col="medium"      className="col-medium">Medium</SortTh>
-            <SortTh col="sessions"    className="col-bar">Sessions</SortTh>
-            <SortTh col="conversions" className="col-num">Convs</SortTh>
-            <SortTh col="convRate"    className="col-num">Conv rate</SortTh>
+            <SortTh col="source"             className="col-source">Source</SortTh>
+            <SortTh col="medium"             className="col-medium">Medium</SortTh>
+            <SortTh col="sessions"           className="col-num">Sessions</SortTh>
+            <SortTh col="avgSessionLengthMs" className="col-num">Avg time</SortTh>
+            <SortTh col="conversions"        className="col-num">Convs</SortTh>
+            <SortTh col="convRate"           className="col-num">Conv rate</SortTh>
           </div>
           {sorted.length === 0 ? <div className="table-empty">No data for this period</div>
             : sorted.map((s, i) => (
               <div key={i} className="table-row">
                 <span className="col-source">{s.source}</span>
                 <span className="col-medium"><span className={`medium-pill medium-${s.medium}`}>{s.medium}</span></span>
-                <span className="col-bar">
-                  <div className="bar-cell">
-                    <div className="bar-fill" style={{ width: `${(s.sessions / maxSessions) * 100}%` }} />
-                    <span className="bar-label">{fmt(s.sessions)}</span>
-                  </div>
-                </span>
+                <span className="col-num">{fmt(s.sessions)}</span>
+                <span className="col-num">{s.avgSessionLengthMs != null ? fmtTime(Math.round(s.avgSessionLengthMs / 1000)) : '—'}</span>
                 <span className="col-num">{fmt(s.conversions)}</span>
                 <span className="col-num">{s.convRate}%</span>
               </div>
