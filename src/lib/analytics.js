@@ -201,17 +201,30 @@ export async function getTopPages(clientId, filter = {}, device = null) {
     .gte('created_at', since).lte('created_at', until);
   if (device) evQuery = evQuery.eq('device_type', device);
 
-  const [evRes, convRes] = await Promise.all([
-    evQuery,
-    supabase.from('conversion_events').select('url, session_id').eq('client_id', clientId).gte('created_at', since).lte('created_at', until),
+  async function fetchAllRows(query) {
+    const PAGE = 1000;
+    let rows = [], from = 0;
+    while (true) {
+      const { data, error } = await query.range(from, from + PAGE - 1);
+      if (error || !data?.length) break;
+      rows = rows.concat(data);
+      if (data.length < PAGE) break;
+      from += PAGE;
+    }
+    return rows;
+  }
+
+  const [allEvents, allConvEvents] = await Promise.all([
+    fetchAllRows(evQuery),
+    fetchAllRows(supabase.from('conversion_events').select('url, session_id').eq('client_id', clientId).gte('created_at', since).lte('created_at', until)),
   ]);
 
   const events = (sources?.length || mediums?.length)
-    ? (evRes.data || []).filter(e => sessionIds.has(e.session_id))
-    : (evRes.data || []);
+    ? allEvents.filter(e => sessionIds.has(e.session_id))
+    : allEvents;
   const convEvents = (sources?.length || mediums?.length)
-    ? (convRes.data || []).filter(c => sessionIds.has(c.session_id))
-    : (convRes.data || []);
+    ? allConvEvents.filter(c => sessionIds.has(c.session_id))
+    : allConvEvents;
   if (!events.length) return [];
 
   function normUrl(raw) {
