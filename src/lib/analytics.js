@@ -210,11 +210,20 @@ export async function getTopPages(clientId, filter = {}, device = null) {
   const convEvents = (convRes.data || []).filter(c => sessionIds.has(c.session_id));
   if (!events.length) return [];
 
+  // Normalise URL to path only, strip trailing slash, lowercase
+  function normUrl(raw) {
+    try {
+      const u = new URL(raw);
+      let p = (u.pathname + u.search).replace(/\?.*/, '').replace(/\/+$/, '') || '/';
+      return p.toLowerCase();
+    } catch { return raw.replace(/\?.*/, '').replace(/\/+$/, '').toLowerCase() || '/'; }
+  }
+
   const pages = {};
   events.forEach(ev => {
-    const url = ev.url.replace(/\?.*/, '');
-    if (!pages[url]) pages[url] = { url, pageviews: 0, sessions: new Set(), sessionTimes: {}, depths: {} };
-    if (ev.type === 'pageview') { pages[url].pageviews++; pages[url].sessions.add(ev.session_id); }
+    const url = normUrl(ev.url);
+    if (!pages[url]) pages[url] = { url, pageviews: 0, sessionTimes: {}, depths: {}, conversions: 0 };
+    if (ev.type === 'pageview') { pages[url].pageviews++; }
     if (ev.type === 'time_on_page' && ev.time_on_page_ms) {
       pages[url].sessionTimes[ev.session_id] = (pages[url].sessionTimes[ev.session_id] || 0) + ev.time_on_page_ms;
     }
@@ -223,14 +232,11 @@ export async function getTopPages(clientId, filter = {}, device = null) {
     }
   });
 
-  // Count conversions per page — only for sessions that had a pageview on that page.
-  // This prevents inflated counts from sessions where the conversion URL differs from
-  // the visited page URL, or where the pageview falls outside the date window.
-  const convSessionsByPage = {};
+  // Count all conversions by page — create entry if no pageview recorded yet
   convEvents.forEach(ce => {
-    const url = ce.url.replace(/\?.*/, '');
-    if (!convSessionsByPage[url]) convSessionsByPage[url] = new Set();
-    convSessionsByPage[url].add(ce.session_id);
+    const url = normUrl(ce.url);
+    if (!pages[url]) pages[url] = { url, pageviews: 0, sessionTimes: {}, depths: {}, conversions: 0 };
+    pages[url].conversions++;
   });
 
   return Object.values(pages).map(p => {
@@ -239,18 +245,13 @@ export async function getTopPages(clientId, filter = {}, device = null) {
     const avgTime = sessionTimeValues.length > 0
       ? Math.round(sessionTimeValues.reduce((a, b) => a + b, 0) / sessionTimeValues.length / 1000)
       : null;
-    // Only count conversions from sessions that actually visited this page
-    const convSessions = convSessionsByPage[p.url] || new Set();
-    const conversions = [...convSessions].filter(sid => p.sessions.has(sid)).length;
-    const sessionCount = p.sessions.size;
     return {
       url: p.url,
       pageviews: p.pageviews,
-      sessions: sessionCount,
       avgTime,
       avgScrollDepth: depthValues.length > 0 ? Math.round(depthValues.reduce((a, b) => a + b, 0) / depthValues.length) : null,
-      conversions,
-      convRate: sessionCount > 0 ? (conversions / sessionCount * 100).toFixed(1) : '0.0',
+      conversions: p.conversions,
+      convRate: p.pageviews > 0 ? (p.conversions / p.pageviews * 100).toFixed(1) : '0.0',
     };
   }).sort((a, b) => b.pageviews - a.pageviews);
 }
