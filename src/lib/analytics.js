@@ -208,89 +208,96 @@ export async function getDailySeries(clientId, filter = {}) {
 
 // ── Top pages ─────────────────────────────────────────────────────────────────
 
-export async function getTopPages(clientId, filter = {}, device = null) {
+function normUrl(raw) {
+  try { return (new URL(raw).pathname.replace(/\/+$/, '') || '/').toLowerCase(); }
+  catch { return raw.replace(/^https?:\/\/[^/]+/, '').replace(/\?.*/, '').replace(/\/+$/, '').toLowerCase() || '/'; }
+}
+
+// Fast version — only fetches pageviews + conversions, no time/scroll.
+// Used for the initial top-10 render. Returns top 10 sorted by conversions desc.
+export async function getTopPagesFast(clientId, filter = {}, device = null) {
   const { since, until } = resolveRange(filter);
   const { sources, mediums } = filter;
 
-  // If source/medium filter active, resolve which session IDs to scope to
   let sessionIdFilter = null;
   if (sources?.length || mediums?.length) {
     const { sessionIds } = await resolveSessionIds(clientId, since, until, sources, mediums);
     sessionIdFilter = [...sessionIds];
   }
 
-  // Fetch ALL pageview events — no row cap, paginated
-  async function fetchAll(query) {
-    const PAGE = 1000;
-    let rows = [], from = 0;
-    while (true) {
-      const { data, error } = await query.range(from, from + PAGE - 1);
-      if (error || !data?.length) break;
-      rows = rows.concat(data);
-      if (data.length < PAGE) break;
-      from += PAGE;
-    }
-    return rows;
-  }
-
-  function normUrl(raw) {
-    try {
-      return (new URL(raw).pathname.replace(/\/+$/, '') || '/').toLowerCase();
-    } catch {
-      return raw.replace(/^https?:\/\/[^/]+/, '').replace(/\?.*/, '').replace(/\/+$/, '').toLowerCase() || '/';
-    }
-  }
-
-  let pvQuery = supabase.from('events')
-    .select('url, session_id')
-    .eq('client_id', clientId)
-    .eq('type', 'pageview')
-    .gte('created_at', since).lte('created_at', until);
+  let pvQuery = supabase.from('events').select('url, session_id').eq('client_id', clientId).eq('type', 'pageview').gte('created_at', since).lte('created_at', until);
   if (device) pvQuery = pvQuery.eq('device_type', device);
   if (sessionIdFilter) pvQuery = pvQuery.in('session_id', sessionIdFilter);
 
-  let topQuery = supabase.from('events')
-    .select('url, session_id, time_on_page_ms, depth_pct, type')
-    .eq('client_id', clientId)
-    .in('type', ['time_on_page', 'scroll_depth'])
-    .gte('created_at', since).lte('created_at', until);
+  let convQuery = supabase.from('conversion_events').select('url').eq('client_id', clientId).gte('created_at', since).lte('created_at', until);
+  if (sessionIdFilter) convQuery = convQuery.in('session_id', sessionIdFilter);
+
+  const [pvEvents, convEvents] = await Promise.all([
+    fetchAllPages(pvQuery),
+    fetchAllPages(convQuery),
+  ]);
+
+  const pages = {};
+  pvEvents.forEach(ev => {
+    const url = normUrl(ev.url);
+    if (!pages[url]) pages[url] = { url, pageviews: 0, conversions: 0 };
+    pages[url].pageviews++;
+  });
+  convEvents.forEach(ce => {
+    const url = normUrl(ce.url);
+    if (!pages[url]) pages[url] = { url, pageviews: 0, conversions: 0 };
+    pages[url].conversions++;
+  });
+
+  return Object.values(pages).map(p => ({
+    url: p.url, pageviews: p.pageviews, conversions: p.conversions,
+    avgTime: null, avgScrollDepth: null,
+    convRate: p.pageviews > 0 ? (p.conversions / p.pageviews * 100).toFixed(1) : '0.0',
+  })).sort((a, b) => b.conversions - a.conversions).slice(0, 10);
+}
+
+// Full version — includes time on page and scroll depth. Slower due to volume.
+export async function getTopPages(clientId, filter = {}, device = null) {
+  const { since, until } = resolveRange(filter);
+  const { sources, mediums } = filter;
+
+  let sessionIdFilter = null;
+  if (sources?.length || mediums?.length) {
+    const { sessionIds } = await resolveSessionIds(clientId, since, until, sources, mediums);
+    sessionIdFilter = [...sessionIds];
+  }
+
+  let pvQuery = supabase.from('events').select('url, session_id').eq('client_id', clientId).eq('type', 'pageview').gte('created_at', since).lte('created_at', until);
+  if (device) pvQuery = pvQuery.eq('device_type', device);
+  if (sessionIdFilter) pvQuery = pvQuery.in('session_id', sessionIdFilter);
+
+  let topQuery = supabase.from('events').select('url, session_id, time_on_page_ms, depth_pct, type').eq('client_id', clientId).in('type', ['time_on_page', 'scroll_depth']).gte('created_at', since).lte('created_at', until);
   if (sessionIdFilter) topQuery = topQuery.in('session_id', sessionIdFilter);
 
-  let convQuery = supabase.from('conversion_events')
-    .select('url, session_id')
-    .eq('client_id', clientId)
-    .gte('created_at', since).lte('created_at', until);
+  let convQuery = supabase.from('conversion_events').select('url, session_id').eq('client_id', clientId).gte('created_at', since).lte('created_at', until);
   if (sessionIdFilter) convQuery = convQuery.in('session_id', sessionIdFilter);
 
   const [pvEvents, engEvents, convEvents] = await Promise.all([
-    fetchAll(pvQuery),
-    fetchAll(topQuery),
-    fetchAll(convQuery),
+    fetchAllPages(pvQuery),
+    fetchAllPages(topQuery),
+    fetchAllPages(convQuery),
   ]);
 
-  // Build page map from pageviews
   const pages = {};
   pvEvents.forEach(ev => {
     const url = normUrl(ev.url);
     if (!pages[url]) pages[url] = { url, pageviews: 0, sessionTimes: {}, depths: {}, conversions: 0 };
     pages[url].pageviews++;
-    // track sessions per page for avg time calculation
     if (!pages[url].sessionTimes[ev.session_id]) pages[url].sessionTimes[ev.session_id] = 0;
   });
-
-  // Merge time and scroll
   engEvents.forEach(ev => {
     const url = normUrl(ev.url);
-    if (!pages[url]) return; // only track engagement on pages we have pageviews for
+    if (!pages[url]) return;
     if (ev.type === 'time_on_page' && ev.time_on_page_ms)
       pages[url].sessionTimes[ev.session_id] = (pages[url].sessionTimes[ev.session_id] || 0) + ev.time_on_page_ms;
-    if (ev.type === 'scroll_depth' && ev.depth_pct) {
-      if (!pages[url].depths) pages[url].depths = {};
+    if (ev.type === 'scroll_depth' && ev.depth_pct)
       pages[url].depths[ev.session_id] = Math.max(pages[url].depths[ev.session_id] || 0, ev.depth_pct);
-    }
   });
-
-  // Count conversions per page
   convEvents.forEach(ce => {
     const url = normUrl(ce.url);
     if (!pages[url]) pages[url] = { url, pageviews: 0, sessionTimes: {}, depths: {}, conversions: 0 };
@@ -301,14 +308,13 @@ export async function getTopPages(clientId, filter = {}, device = null) {
     const times = Object.values(p.sessionTimes).filter(t => t > 0);
     const depths = Object.values(p.depths || {});
     return {
-      url: p.url,
-      pageviews: p.pageviews,
+      url: p.url, pageviews: p.pageviews,
       avgTime: times.length > 0 ? Math.round(times.reduce((a, b) => a + b, 0) / times.length / 1000) : null,
       avgScrollDepth: depths.length > 0 ? Math.round(depths.reduce((a, b) => a + b, 0) / depths.length) : null,
       conversions: p.conversions,
       convRate: p.pageviews > 0 ? (p.conversions / p.pageviews * 100).toFixed(1) : '0.0',
     };
-  }).sort((a, b) => b.pageviews - a.pageviews);
+  }).sort((a, b) => b.conversions - a.conversions);
 }
 
 // ── Sources ───────────────────────────────────────────────────────────────────

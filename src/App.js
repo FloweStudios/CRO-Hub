@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase, signIn, signOut, onAuthChange, getPartners, createPartner, updatePartner, clearPartnerData, deletePartner, getGoals, createGoal, updateGoal, deleteGoal } from './lib/supabase';
 import { generateSnippet } from './lib/snippet';
-import { getOverview, getDailySeries, getTopPages, getSources, getConversionPaths, getPageInfluence, getSessionPath, getFormAnalytics, getVisitorLatency } from './lib/analytics';
+import { getOverview, getDailySeries, getTopPages, getTopPagesFast, getSources, getConversionPaths, getPageInfluence, getSessionPath, getFormAnalytics, getVisitorLatency } from './lib/analytics';
 import './App.css';
 import FormsPage from './pages/FormsPage';
 import { getConversionEvents, deleteConversionEvent } from './lib/supabase';
@@ -921,14 +921,30 @@ function GoalModal({ clientId, goal, onClose, onSaved }) {
 function TopPagesPage({ partner, filter }) {
   const [pages, setPages] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingAll, setLoadingAll] = useState(false);
+  const [allLoaded, setAllLoaded] = useState(false);
   const [device, setDevice] = useState(null);
-  const [sortCol, setSortCol] = useState('pageviews');
+  const [sortCol, setSortCol] = useState('conversions');
   const [sortDir, setSortDir] = useState('desc');
 
   useEffect(() => {
     setLoading(true);
-    getTopPages(partner.id, filter, device).then(data => { setPages(data); setLoading(false); });
+    setAllLoaded(false);
+    // Fast load: top 10 by conversions only — no time/scroll data
+    getTopPagesFast(partner.id, filter, device).then(data => {
+      setPages(data);
+      setLoading(false);
+    });
   }, [partner.id, JSON.stringify(filter), device]); // eslint-disable-line
+
+  function handleLoadAll() {
+    setLoadingAll(true);
+    getTopPages(partner.id, filter, device).then(data => {
+      setPages(data);
+      setLoadingAll(false);
+      setAllLoaded(true);
+    });
+  }
 
   function handleSort(col) {
     if (sortCol === col) { setSortDir(d => d === 'desc' ? 'asc' : 'desc'); }
@@ -937,8 +953,7 @@ function TopPagesPage({ partner, filter }) {
 
   const sorted = useMemo(() => {
     return [...pages].sort((a, b) => {
-      const av = a[sortCol] ?? -1;
-      const bv = b[sortCol] ?? -1;
+      const av = a[sortCol] ?? -1, bv = b[sortCol] ?? -1;
       const av2 = typeof av === 'string' ? parseFloat(av) : av;
       const bv2 = typeof bv === 'string' ? parseFloat(bv) : bv;
       return sortDir === 'desc' ? bv2 - av2 : av2 - bv2;
@@ -958,37 +973,44 @@ function TopPagesPage({ partner, filter }) {
   return (
     <div>
       <div className="section-header">
-        <div><h3 className="section-title">Top pages</h3><p className="section-sub">Click a column header to sort</p></div>
+        <div><h3 className="section-title">Top pages</h3><p className="section-sub">Top 10 by conversions · click a column to sort</p></div>
         <div className="filter-group">
           {[null, 'mobile', 'tablet', 'desktop'].map(d => (
-            <button key={d || 'all'} className={`filter-btn ${device === d ? 'active' : ''}`} onClick={() => setDevice(d)}>
-              {d || 'All'}
-            </button>
+            <button key={d || 'all'} className={`filter-btn ${device === d ? 'active' : ''}`} onClick={() => setDevice(d)}>{d || 'All'}</button>
           ))}
         </div>
       </div>
       {loading ? <div className="loading-state"><div className="spinner lg" /></div> : (
-        <div className="data-table">
-          <div className="table-head">
-            <span className="col-url">Page</span>
-            <SortTh col="pageviews"     className="col-num">Pageviews</SortTh>
-            <SortTh col="avgTime"       className="col-num">Avg time</SortTh>
-            <SortTh col="avgScrollDepth" className="col-num">Avg scroll</SortTh>
-            <SortTh col="conversions"   className="col-num">Convs</SortTh>
-            <SortTh col="convRate"      className="col-num">Conv rate</SortTh>
+        <>
+          <div className="data-table">
+            <div className="table-head">
+              <span className="col-url">Page</span>
+              <SortTh col="pageviews"      className="col-num">Pageviews</SortTh>
+              <SortTh col="avgTime"        className="col-num">Avg time</SortTh>
+              <SortTh col="avgScrollDepth" className="col-num">Avg scroll</SortTh>
+              <SortTh col="conversions"    className="col-num">Convs</SortTh>
+              <SortTh col="convRate"       className="col-num">Conv rate</SortTh>
+            </div>
+            {sorted.length === 0 ? <div className="table-empty">No data for this period</div>
+              : sorted.map((p, i) => (
+                <div key={i} className="table-row">
+                  <span className="col-url mono-sm">{p.url}</span>
+                  <span className="col-num">{fmt(p.pageviews)}</span>
+                  <span className="col-num">{p.avgTime != null ? fmtTime(p.avgTime) : '—'}</span>
+                  <span className="col-num">{p.avgScrollDepth != null ? `${p.avgScrollDepth}%` : '—'}</span>
+                  <span className="col-num">{fmt(p.conversions)}</span>
+                  <span className="col-num">{p.convRate}%</span>
+                </div>
+              ))}
           </div>
-          {sorted.length === 0 ? <div className="table-empty">No data for this period</div>
-            : sorted.map((p, i) => (
-              <div key={i} className="table-row">
-                <span className="col-url mono-sm">{p.url.replace(/^https?:\/\/[^/]+/, '') || '/'}</span>
-                <span className="col-num">{fmt(p.pageviews)}</span>
-                <span className="col-num">{p.avgTime != null ? fmtTime(p.avgTime) : '—'}</span>
-                <span className="col-num">{p.avgScrollDepth != null ? `${p.avgScrollDepth}%` : '—'}</span>
-                <span className="col-num">{fmt(p.conversions)}</span>
-                <span className="col-num">{p.convRate}%</span>
-              </div>
-            ))}
-        </div>
+          {!allLoaded && (
+            <div style={{ textAlign: 'center', padding: '16px 0' }}>
+              <button className="btn-ghost" onClick={handleLoadAll} disabled={loadingAll}>
+                {loadingAll ? <><span className="spinner" style={{ marginRight: 8 }} />Loading all pages…</> : 'Load all pages with time & scroll data'}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
