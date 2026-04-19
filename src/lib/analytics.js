@@ -29,14 +29,22 @@ export function resolveRange(filter = {}) {
 // filters apply consistently across every tab.
 
 async function resolveSessionIds(clientId, since, until, sources, mediums) {
-  const { data } = await supabase
-    .from('sessions')
-    .select('session_id, utm_source, utm_medium, referrer_url, converted, visitor_id, device_type, country, created_at')
-    .eq('client_id', clientId)
-    .gte('created_at', since)
-    .lte('created_at', until);
+  const PAGE = 1000;
+  let all = [], from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('sessions')
+      .select('session_id, utm_source, utm_medium, referrer_url, converted, visitor_id, device_type, country, created_at')
+      .eq('client_id', clientId)
+      .gte('created_at', since)
+      .lte('created_at', until)
+      .range(from, from + PAGE - 1);
+    if (error || !data?.length) break;
+    all = all.concat(data);
+    if (data.length < PAGE) break;
+    from += PAGE;
+  }
 
-  const all = data || [];
   const filtered = (sources?.length || mediums?.length)
     ? all.filter(s => {
         const srcOk = !sources?.length || sources.includes(s.utm_source || 'direct');
@@ -52,7 +60,19 @@ async function resolveSessionIds(clientId, since, until, sources, mediums) {
   };
 }
 
-// ── Overview ──────────────────────────────────────────────────────────────────
+// Generic paginator for any Supabase query — removes the 1000 row default cap
+async function fetchAllPages(query) {
+  const PAGE = 1000;
+  let rows = [], from = 0;
+  while (true) {
+    const { data, error } = await query.range(from, from + PAGE - 1);
+    if (error || !data?.length) break;
+    rows = rows.concat(data);
+    if (data.length < PAGE) break;
+    from += PAGE;
+  }
+  return rows;
+}
 
 export async function getOverview(clientId, filter = {}) {
   const { since, until, prevSince, prevUntil } = resolveRange(filter);
@@ -160,12 +180,11 @@ export async function getDailySeries(clientId, filter = {}) {
   const days = Math.max(1, Math.ceil(msRange / 86400000));
   const { sources, mediums } = filter;
 
-  const [sessRes, convRes] = await Promise.all([
-    supabase.from('sessions').select('session_id, created_at, utm_source, utm_medium').eq('client_id', clientId).gte('created_at', since).lte('created_at', until),
-    supabase.from('conversion_events').select('session_id, created_at').eq('client_id', clientId).gte('created_at', since).lte('created_at', until),
+  const [allSessions, convData] = await Promise.all([
+    fetchAllPages(supabase.from('sessions').select('session_id, created_at, utm_source, utm_medium').eq('client_id', clientId).gte('created_at', since).lte('created_at', until)),
+    fetchAllPages(supabase.from('conversion_events').select('session_id, created_at').eq('client_id', clientId).gte('created_at', since).lte('created_at', until)),
   ]);
 
-  const allSessions = sessRes.data || [];
   const filteredSessions = (sources?.length || mediums?.length)
     ? allSessions.filter(s => {
         const srcOk = !sources?.length || sources.includes(s.utm_source || 'direct');
@@ -174,7 +193,7 @@ export async function getDailySeries(clientId, filter = {}) {
       })
     : allSessions;
   const filteredIds = new Set(filteredSessions.map(s => s.session_id));
-  const convs = (convRes.data || []).filter(c => filteredIds.has(c.session_id));
+  const convs = convData.filter(c => filteredIds.has(c.session_id));
 
   const map = {};
   for (let i = 0; i < days; i++) {
@@ -299,27 +318,26 @@ export async function getTopPages(clientId, filter = {}, device = null) {
 export async function getSources(clientId, filter = {}) {
   const { since, until } = resolveRange(filter);
 
-  const [sessRes, convRes, timeRes] = await Promise.all([
-    supabase.from('sessions').select('session_id, utm_source, utm_medium, referrer_url').eq('client_id', clientId).gte('created_at', since).lte('created_at', until),
-    supabase.from('conversion_events').select('session_id').eq('client_id', clientId).gte('created_at', since).lte('created_at', until),
-    supabase.from('events').select('session_id, time_on_page_ms').eq('client_id', clientId).eq('type', 'time_on_page').gte('created_at', since).lte('created_at', until),
+  const [allSessions, convData, timeData] = await Promise.all([
+    fetchAllPages(supabase.from('sessions').select('session_id, utm_source, utm_medium, referrer_url').eq('client_id', clientId).gte('created_at', since).lte('created_at', until)),
+    fetchAllPages(supabase.from('conversion_events').select('session_id').eq('client_id', clientId).gte('created_at', since).lte('created_at', until)),
+    fetchAllPages(supabase.from('events').select('session_id, time_on_page_ms').eq('client_id', clientId).eq('type', 'time_on_page').gte('created_at', since).lte('created_at', until)),
   ]);
 
-  if (!sessRes.data) return [];
+  if (!allSessions.length) return [];
 
-  // Sum time chunks per session
   const sessionTotalTime = {};
-  (timeRes.data || []).forEach(ev => {
+  timeData.forEach(ev => {
     if (ev.time_on_page_ms) sessionTotalTime[ev.session_id] = (sessionTotalTime[ev.session_id] || 0) + ev.time_on_page_ms;
   });
 
   const convCountBySession = {};
-  (convRes.data || []).forEach(c => {
+  convData.forEach(c => {
     convCountBySession[c.session_id] = (convCountBySession[c.session_id] || 0) + 1;
   });
 
   const sourceMap = {};
-  (sessRes.data || []).forEach(s => {
+  allSessions.forEach(s => {
     let source = 'Direct', medium = 'none';
     if (s.utm_source) { source = s.utm_source; medium = s.utm_medium || 'none'; }
     else if (s.referrer_url) {
@@ -524,21 +542,14 @@ export async function getVisitorLatency(clientId, filter = {}) {
 
   // Build latency from raw data so date range and source filter work correctly.
   // The visitor_conversion_latency view has no date/source columns so we bypass it.
-  const [sessRes, convRes] = await Promise.all([
-    supabase.from('sessions')
-      .select('session_id, visitor_id, utm_source, utm_medium, created_at, converted')
-      .eq('client_id', clientId)
-      .gte('created_at', since).lte('created_at', until),
-    supabase.from('conversion_events')
-      .select('session_id, created_at')
-      .eq('client_id', clientId)
-      .gte('created_at', since).lte('created_at', until),
+  const [allSessions, convData] = await Promise.all([
+    fetchAllPages(supabase.from('sessions').select('session_id, visitor_id, utm_source, utm_medium, created_at, converted').eq('client_id', clientId).gte('created_at', since).lte('created_at', until)),
+    fetchAllPages(supabase.from('conversion_events').select('session_id, created_at').eq('client_id', clientId).gte('created_at', since).lte('created_at', until)),
   ]);
 
-  if (!sessRes.data || sessRes.data.length === 0) return { avgSessions: 0, avgHours: 0, distribution: [], totalConverters: 0 };
+  if (!allSessions.length) return { avgSessions: 0, avgHours: 0, distribution: [], totalConverters: 0 };
 
   // Apply source/medium filter
-  const allSessions = sessRes.data;
   const filteredSessions = (sources?.length || mediums?.length)
     ? allSessions.filter(s => {
         const srcOk = !sources?.length || sources.includes(s.utm_source || 'direct');
@@ -554,7 +565,7 @@ export async function getVisitorLatency(clientId, filter = {}) {
 
   // Find converting sessions that pass filter
   const convertingSessionIds = new Set(
-    (convRes.data || [])
+    convData
       .filter(c => filteredSessionIds.has(c.session_id))
       .map(c => c.session_id)
   );
