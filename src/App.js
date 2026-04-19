@@ -191,15 +191,22 @@ function PartnerCard({ partner, onClick }) {
   const [stats, setStats] = useState(null);
   useEffect(() => {
     const since = new Date(Date.now() - 30 * 86400000).toISOString();
-    Promise.all([
-      supabase.from('sessions').select('session_id, converted').eq('client_id', partner.id).gte('created_at', since),
-      supabase.from('conversion_events').select('id').eq('client_id', partner.id).gte('created_at', since),
-    ]).then(([sessRes, convRes]) => {
-      const sessions = sessRes.data || [];
-      const conversions = convRes.data || [];
+    async function load() {
+      const PAGE = 1000;
+      let sessions = [], from = 0;
+      while (true) {
+        const { data } = await supabase.from('sessions').select('session_id, converted').eq('client_id', partner.id).gte('created_at', since).range(from, from + PAGE - 1);
+        if (!data?.length) break;
+        sessions = sessions.concat(data);
+        if (data.length < PAGE) break;
+        from += PAGE;
+      }
+      const { data: convData } = await supabase.from('conversion_events').select('id').eq('client_id', partner.id).gte('created_at', since);
+      const conversions = convData || [];
       const convRate = sessions.length > 0 ? (conversions.length / sessions.length * 100).toFixed(1) : '0.0';
       setStats({ sessions: sessions.length, conversions: conversions.length, convRate });
-    });
+    }
+    load();
   }, [partner.id]);
   return (
     <button className="partner-card" onClick={onClick}>
