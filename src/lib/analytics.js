@@ -184,6 +184,76 @@ export async function getOverview(clientId, filter = {}) {
 
 // ── Daily series ──────────────────────────────────────────────────────────────
 
+export async function getRevenueBreakdown(clientId, filter = {}) {
+  const { since, until } = resolveRange(filter);
+  const { sources, mediums } = filter;
+
+  let sessionIdFilter = null;
+  if (sources?.length || mediums?.length) {
+    const { sessionIds } = await resolveSessionIds(clientId, since, until, sources, mediums);
+    sessionIdFilter = [...sessionIds];
+  }
+
+  const [goalsRes, convRes, sessRes] = await Promise.all([
+    supabase.from('conversion_goals').select('id, name, goal_value').eq('client_id', clientId),
+    supabase.from('conversion_events').select('goal_id, session_id').eq('client_id', clientId).gte('created_at', since).lte('created_at', until),
+    fetchAllPages(supabase.from('sessions').select('session_id, utm_source, utm_medium, referrer_url').eq('client_id', clientId).gte('created_at', since).lte('created_at', until)),
+  ]);
+
+  const goalMap = {};
+  (goalsRes.data || []).forEach(g => { goalMap[g.id] = { name: g.name, value: g.goal_value != null ? Number(g.goal_value) : null }; });
+
+  const sessionSourceMap = {};
+  sessRes.forEach(s => {
+    let source = 'Direct';
+    if (s.utm_source) source = s.utm_source;
+    else if (s.referrer_url) {
+      try {
+        const host = new URL(s.referrer_url).hostname.replace('www.', '');
+        if (/google|bing|yahoo|duckduckgo/.test(host)) source = 'Organic Search';
+        else if (/facebook|instagram|twitter|linkedin|tiktok|pinterest/.test(host)) source = host;
+        else source = host;
+      } catch { source = 'Referral'; }
+    }
+    sessionSourceMap[s.session_id] = source;
+  });
+
+  let convs = convRes.data || [];
+  if (sessionIdFilter) convs = convs.filter(c => sessionIdFilter.includes(c.session_id));
+
+  let totalRevenue = 0;
+  const byGoal = {};
+  const bySource = {};
+
+  convs.forEach(c => {
+    const goal = goalMap[c.goal_id];
+    if (!goal || goal.value == null) return;
+    const rev = goal.value;
+    totalRevenue += rev;
+
+    // By goal
+    if (!byGoal[goal.name]) byGoal[goal.name] = { conversions: 0, revenue: 0 };
+    byGoal[goal.name].conversions++;
+    byGoal[goal.name].revenue += rev;
+
+    // By source
+    const src = sessionSourceMap[c.session_id] || 'Direct';
+    if (!bySource[src]) bySource[src] = { conversions: 0, revenue: 0 };
+    bySource[src].conversions++;
+    bySource[src].revenue += rev;
+  });
+
+  return {
+    totalRevenue,
+    byGoal: Object.entries(byGoal)
+      .map(([name, d]) => ({ name, ...d, pct: totalRevenue > 0 ? (d.revenue / totalRevenue * 100).toFixed(0) : '0' }))
+      .sort((a, b) => b.revenue - a.revenue),
+    bySource: Object.entries(bySource)
+      .map(([source, d]) => ({ source, ...d, pct: totalRevenue > 0 ? (d.revenue / totalRevenue * 100).toFixed(0) : '0' }))
+      .sort((a, b) => b.revenue - a.revenue),
+  };
+}
+
 export async function getDailySeries(clientId, filter = {}) {
   const { since, until } = resolveRange(filter);
   const msRange = new Date(until) - new Date(since);

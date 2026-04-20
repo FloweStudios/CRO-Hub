@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase, signIn, signOut, onAuthChange, getPartners, createPartner, updatePartner, clearPartnerData, deletePartner, getGoals, createGoal, updateGoal, deleteGoal } from './lib/supabase';
 import { generateSnippet } from './lib/snippet';
-import { getOverview, getDailySeries, getTopPages, getTopPagesFast, getEntryExitPages, getSources, getConversionPaths, getPageInfluence, getSessionPath, getFormAnalytics, getVisitorLatency } from './lib/analytics';
+import { getOverview, getDailySeries, getTopPages, getTopPagesFast, getEntryExitPages, getSources, getConversionPaths, getPageInfluence, getSessionPath, getFormAnalytics, getVisitorLatency, getRevenueBreakdown } from './lib/analytics';
 import './App.css';
 import FormsPage from './pages/FormsPage';
 import { getConversionEvents, deleteConversionEvent } from './lib/supabase';
@@ -456,8 +456,7 @@ function OverviewPage({ partner, filter }) {
 
   return (
     <div className="overview-content">
-      <div className={`stats-strip ${data.totalRevenue > 0 ? 'seven' : 'six'}`}>
-        {data.totalRevenue > 0 && <StatBox label="Est. revenue" value={fmtMoney(data.totalRevenue)} highlight />}
+      <div className="stats-strip six">
         <StatBox label="Conversions" value={fmt(data.conversions)} delta={data.conversionsDelta} highlight />
         <StatBox label="Conv rate" value={data.convRate + '%'} delta={data.convRateDelta} highlight />
         <StatBox label="Sessions" value={fmt(data.sessions)} delta={data.sessionsDelta} />
@@ -532,6 +531,8 @@ function GoalsPage({ partner, filter }) {
   const [showAdd, setShowAdd]         = useState(false);
   const [editGoal, setEditGoal]       = useState(null); // goal object to edit
   const [tab, setTab]                 = useState('events');
+  const [revenueData, setRevenueData] = useState(null);
+  const [revenueLoading, setRevenueLoading] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [sessionPath, setSessionPath] = useState(null); // { ev, steps[] }
   const [pathLoading, setPathLoading] = useState(false);
@@ -553,6 +554,11 @@ function GoalsPage({ partner, filter }) {
 
   useEffect(() => { loadGoals(); }, [loadGoals]);
   useEffect(() => { loadEvents(); }, [loadEvents]);
+  useEffect(() => {
+    if (tab !== 'revenue') return;
+    setRevenueLoading(true);
+    getRevenueBreakdown(partner.id, filter).then(d => { setRevenueData(d); setRevenueLoading(false); });
+  }, [tab, partner.id, JSON.stringify(filter)]); // eslint-disable-line
 
   async function handleConfirmDelete() {
     if (!confirmDelete) return;
@@ -656,6 +662,9 @@ function GoalsPage({ partner, filter }) {
         <button className={`goals-tab ${tab === 'goals' ? 'active' : ''}`} onClick={() => setTab('goals')}>
           Conversion triggers <span className="goals-tab-count">{goals.length}</span>
         </button>
+        <button className={`goals-tab ${tab === 'revenue' ? 'active' : ''}`} onClick={() => setTab('revenue')}>
+          Revenue
+        </button>
       </div>
 
       {(showAdd || editGoal) && (
@@ -727,11 +736,65 @@ function GoalsPage({ partner, filter }) {
               </div>
             )
       )}
+
+      {/* ── Revenue tab ── */}
+      {tab === 'revenue' && (
+        revenueLoading ? <div className="loading-state"><div className="spinner lg" /></div>
+        : !revenueData || revenueData.totalRevenue === 0
+          ? <div className="empty-state"><div className="empty-icon">◈</div><h3>No revenue data yet</h3><p>Attach a $ value to your conversion triggers to start tracking revenue.</p></div>
+          : (
+            <div>
+              <div className="stats-strip three" style={{ marginBottom: 24 }}>
+                <StatBox label="Total revenue" value={fmtMoney(revenueData.totalRevenue)} highlight />
+                <StatBox label="Tracked goals" value={revenueData.byGoal.length} />
+                <StatBox label="Sources contributing" value={revenueData.bySource.length} />
+              </div>
+              <div className="two-col" style={{ alignItems: 'flex-start' }}>
+                <div className="info-card">
+                  <h4 className="card-label">Revenue by goal</h4>
+                  <div className="data-table" style={{ marginTop: 8 }}>
+                    <div className="table-head">
+                      <span className="col-url">Goal</span>
+                      <span className="col-num">Convs</span>
+                      <span className="col-num">Revenue</span>
+                      <span className="col-num">% of total</span>
+                    </div>
+                    {revenueData.byGoal.map((g, i) => (
+                      <div key={i} className="table-row">
+                        <span className="col-url">{g.name}</span>
+                        <span className="col-num">{fmt(g.conversions)}</span>
+                        <span className="col-num">{fmtMoney(g.revenue)}</span>
+                        <span className="col-num">{g.pct}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="info-card">
+                  <h4 className="card-label">Revenue by source</h4>
+                  <div className="data-table" style={{ marginTop: 8 }}>
+                    <div className="table-head">
+                      <span className="col-url">Source</span>
+                      <span className="col-num">Convs</span>
+                      <span className="col-num">Revenue</span>
+                      <span className="col-num">% of total</span>
+                    </div>
+                    {revenueData.bySource.map((s, i) => (
+                      <div key={i} className="table-row">
+                        <span className="col-url">{s.source}</span>
+                        <span className="col-num">{fmt(s.conversions)}</span>
+                        <span className="col-num">{fmtMoney(s.revenue)}</span>
+                        <span className="col-num">{s.pct}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+      )}
     </div>
   );
 }
-
-// ─── Unified add/edit goal modal ──────────────────────────────────────────────
 
 function GoalModal({ clientId, goal, onClose, onSaved }) {
   const isEdit = !!goal;
