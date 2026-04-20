@@ -57,6 +57,13 @@ var _dom='${esc(cleanDomain)}',_h=location.hostname.toLowerCase();
 _h=_h.indexOf('www.')===0?_h.slice(4):_h;
 if(_h!==_dom&&_h.slice(-(_dom.length+1))!=='.'+_dom)return;
 
+// Bot / headless detection — bail out early to protect data quality
+var _ua=(navigator.userAgent||'').toLowerCase();
+var _botRe=/bot|crawler|spider|headless|phantom|selenium|puppeteer|playwright|googlebot|bingbot|yandex|baidu|lighthouse|pagespeed|prerender/;
+if(_botRe.test(_ua))return;
+if(!navigator.cookieEnabled)return;
+if(window._phantom||window.callPhantom||window.__nightmare||window.Cypress)return;
+
 var _cid='${esc(clientId)}',_sec='${esc(secretKey)}',_ing='${esc(ingestUrl)}';
 var _goals=${goalsJson};
 var _formDefs=${formDefsJson};

@@ -225,7 +225,7 @@ export async function getTopPagesFast(clientId, filter = {}, device = null) {
     sessionIdFilter = [...sessionIds];
   }
 
-  let pvQuery = supabase.from('events').select('url, session_id').eq('client_id', clientId).eq('type', 'pageview').gte('created_at', since).lte('created_at', until);
+  let pvQuery = supabase.from('events').select('url, session_id, ts').eq('client_id', clientId).eq('type', 'pageview').gte('created_at', since).lte('created_at', until);
   if (device) pvQuery = pvQuery.eq('device_type', device);
   if (sessionIdFilter) pvQuery = pvQuery.in('session_id', sessionIdFilter);
 
@@ -237,21 +237,35 @@ export async function getTopPagesFast(clientId, filter = {}, device = null) {
     fetchAllPages(convQuery),
   ]);
 
+  // Find last page per session for exit rate
+  const sessionLastPage = {};
+  pvEvents.forEach(ev => {
+    const url = normUrl(ev.url);
+    const existing = sessionLastPage[ev.session_id];
+    if (!existing || ev.ts > existing.ts) sessionLastPage[ev.session_id] = { url, ts: ev.ts };
+  });
+  const exitCounts = {};
+  Object.values(sessionLastPage).forEach(({ url }) => {
+    exitCounts[url] = (exitCounts[url] || 0) + 1;
+  });
+
   const pages = {};
   pvEvents.forEach(ev => {
     const url = normUrl(ev.url);
-    if (!pages[url]) pages[url] = { url, pageviews: 0, conversions: 0 };
+    if (!pages[url]) pages[url] = { url, pageviews: 0, sessions: new Set(), conversions: 0 };
     pages[url].pageviews++;
+    pages[url].sessions.add(ev.session_id);
   });
   convEvents.forEach(ce => {
     const url = normUrl(ce.url);
-    if (!pages[url]) pages[url] = { url, pageviews: 0, conversions: 0 };
+    if (!pages[url]) pages[url] = { url, pageviews: 0, sessions: new Set(), conversions: 0 };
     pages[url].conversions++;
   });
 
   return Object.values(pages).map(p => ({
     url: p.url, pageviews: p.pageviews, conversions: p.conversions,
     avgTime: null, avgScrollDepth: null,
+    exitRate: p.sessions.size > 0 ? ((exitCounts[p.url] || 0) / p.sessions.size * 100).toFixed(1) : '0.0',
     convRate: p.pageviews > 0 ? (p.conversions / p.pageviews * 100).toFixed(1) : '0.0',
   })).sort((a, b) => b.conversions - a.conversions).slice(0, 10);
 }
@@ -267,7 +281,7 @@ export async function getTopPages(clientId, filter = {}, device = null) {
     sessionIdFilter = [...sessionIds];
   }
 
-  let pvQuery = supabase.from('events').select('url, session_id').eq('client_id', clientId).eq('type', 'pageview').gte('created_at', since).lte('created_at', until);
+  let pvQuery = supabase.from('events').select('url, session_id, ts').eq('client_id', clientId).eq('type', 'pageview').gte('created_at', since).lte('created_at', until);
   if (device) pvQuery = pvQuery.eq('device_type', device);
   if (sessionIdFilter) pvQuery = pvQuery.in('session_id', sessionIdFilter);
 
@@ -283,11 +297,22 @@ export async function getTopPages(clientId, filter = {}, device = null) {
     fetchAllPages(convQuery),
   ]);
 
+  // Exit rate: find last page per session
+  const sessionLastPage = {};
+  pvEvents.forEach(ev => {
+    const url = normUrl(ev.url);
+    const ex = sessionLastPage[ev.session_id];
+    if (!ex || ev.ts > ex.ts) sessionLastPage[ev.session_id] = { url, ts: ev.ts };
+  });
+  const exitCounts = {};
+  Object.values(sessionLastPage).forEach(({ url }) => { exitCounts[url] = (exitCounts[url] || 0) + 1; });
+
   const pages = {};
   pvEvents.forEach(ev => {
     const url = normUrl(ev.url);
-    if (!pages[url]) pages[url] = { url, pageviews: 0, sessionTimes: {}, depths: {}, conversions: 0 };
+    if (!pages[url]) pages[url] = { url, pageviews: 0, sessions: new Set(), sessionTimes: {}, depths: {}, conversions: 0 };
     pages[url].pageviews++;
+    pages[url].sessions.add(ev.session_id);
     if (!pages[url].sessionTimes[ev.session_id]) pages[url].sessionTimes[ev.session_id] = 0;
   });
   engEvents.forEach(ev => {
@@ -300,19 +325,21 @@ export async function getTopPages(clientId, filter = {}, device = null) {
   });
   convEvents.forEach(ce => {
     const url = normUrl(ce.url);
-    if (!pages[url]) pages[url] = { url, pageviews: 0, sessionTimes: {}, depths: {}, conversions: 0 };
+    if (!pages[url]) pages[url] = { url, pageviews: 0, sessions: new Set(), sessionTimes: {}, depths: {}, conversions: 0 };
     pages[url].conversions++;
   });
 
   return Object.values(pages).map(p => {
     const times = Object.values(p.sessionTimes).filter(t => t > 0);
     const depths = Object.values(p.depths || {});
+    const sessionCount = p.sessions.size;
     return {
       url: p.url, pageviews: p.pageviews,
       avgTime: times.length > 0 ? Math.round(times.reduce((a, b) => a + b, 0) / times.length / 1000) : null,
       avgScrollDepth: depths.length > 0 ? Math.round(depths.reduce((a, b) => a + b, 0) / depths.length) : null,
       conversions: p.conversions,
       convRate: p.pageviews > 0 ? (p.conversions / p.pageviews * 100).toFixed(1) : '0.0',
+      exitRate: sessionCount > 0 ? ((exitCounts[p.url] || 0) / sessionCount * 100).toFixed(1) : '0.0',
     };
   }).sort((a, b) => b.conversions - a.conversions);
 }

@@ -990,6 +990,7 @@ function TopPagesPage({ partner, filter }) {
               <SortTh col="avgScrollDepth" className="col-num">Avg scroll</SortTh>
               <SortTh col="conversions"    className="col-num">Convs</SortTh>
               <SortTh col="convRate"       className="col-num">Conv rate</SortTh>
+              <SortTh col="exitRate"       className="col-num">Exit rate</SortTh>
             </div>
             {sorted.length === 0 ? <div className="table-empty">No data for this period</div>
               : sorted.map((p, i) => (
@@ -1000,6 +1001,7 @@ function TopPagesPage({ partner, filter }) {
                   <span className="col-num">{p.avgScrollDepth != null ? `${p.avgScrollDepth}%` : '—'}</span>
                   <span className="col-num">{fmt(p.conversions)}</span>
                   <span className="col-num">{p.convRate}%</span>
+                  <span className="col-num">{p.exitRate != null ? `${p.exitRate}%` : '—'}</span>
                 </div>
               ))}
           </div>

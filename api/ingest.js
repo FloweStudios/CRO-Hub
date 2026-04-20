@@ -23,6 +23,20 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).send('Method not allowed');
 
+  // ── Bot filtering ──────────────────────────────────────────────────────────
+  const ua = (req.headers['user-agent'] || '').toLowerCase();
+  const BOT_PATTERNS = [
+    'bot', 'crawler', 'spider', 'scraper', 'headless', 'phantom', 'selenium',
+    'puppeteer', 'playwright', 'wget', 'curl', 'python-requests', 'axios',
+    'googlebot', 'bingbot', 'yandex', 'baidu', 'duckduckbot', 'facebookexternalhit',
+    'twitterbot', 'linkedinbot', 'slurp', 'ahrefsbot', 'semrushbot', 'mj12bot',
+    'dotbot', 'rogerbot', 'seznambot', 'archive.org', 'ia_archiver',
+    'prerender', 'lighthouse', 'pagespeed', 'gtmetrix',
+  ];
+  if (!ua || BOT_PATTERNS.some(p => ua.includes(p))) {
+    return res.status(202).send('accepted');
+  }
+
   let body = req.body;
   if (typeof body === 'string') {
     try { body = JSON.parse(body); } catch { return res.status(400).send('Invalid JSON'); }
