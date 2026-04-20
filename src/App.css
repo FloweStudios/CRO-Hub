@@ -507,6 +507,7 @@ select.field-input { cursor: pointer; }
 .stats-strip { display: grid; gap: 12px; margin-bottom: 20px; }
 .stats-strip.four  { grid-template-columns: repeat(4, 1fr); }
 .stats-strip.six   { grid-template-columns: repeat(6, 1fr); }
+.stats-strip.seven { grid-template-columns: repeat(7, 1fr); }
 .stats-strip.three { grid-template-columns: repeat(3, 1fr); }
 
 .stat-box {

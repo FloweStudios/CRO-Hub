@@ -88,7 +88,7 @@ export async function getOverview(clientId, filter = {}) {
       ? supabase.from('conversion_events').select('id, session_id').eq('client_id', clientId).gte('created_at', prevSince).lte('created_at', prevUntil)
       : Promise.resolve({ data: [] }),
     supabase.from('events').select('type, session_id').eq('client_id', clientId).in('type', ['pageview', 'click']).gte('created_at', since).lte('created_at', until),
-    supabase.from('conversion_goals').select('id, name').eq('client_id', clientId),
+    supabase.from('conversion_goals').select('id, name, goal_value').eq('client_id', clientId),
     // Fetch time_on_page and scroll_depth for avg session length + avg scroll
     supabase.from('events').select('session_id, type, time_on_page_ms, depth_pct')
       .eq('client_id', clientId)
@@ -97,7 +97,8 @@ export async function getOverview(clientId, filter = {}) {
   ]);
 
   const goalNames = {};
-  (goals.data || []).forEach(g => { goalNames[g.id] = g.name; });
+  const goalValues = {};
+  (goals.data || []).forEach(g => { goalNames[g.id] = g.name; goalValues[g.id] = g.goal_value ? Number(g.goal_value) : null; });
 
   const conversions = (currConvRes.data  || []).filter(c => curr.sessionIds.has(c.session_id));
   const prevConvs   = (prevConvRes.data  || []).filter(c => prev.sessionIds.has(c.session_id));
@@ -152,9 +153,16 @@ export async function getOverview(clientId, filter = {}) {
   }
 
   const conversionsByGoal = {};
+  const revenueByGoal = {};
+  let totalRevenue = 0;
   conversions.forEach(c => {
     const name = goalNames[c.goal_id] || 'Unknown goal';
     conversionsByGoal[name] = (conversionsByGoal[name] || 0) + 1;
+    const val = goalValues[c.goal_id];
+    if (val != null) {
+      revenueByGoal[name] = (revenueByGoal[name] || 0) + val;
+      totalRevenue += val;
+    }
   });
 
   return {
@@ -169,6 +177,8 @@ export async function getOverview(clientId, filter = {}) {
     avgSessionLengthMs,
     avgScrollDepth,
     conversionsByGoal,
+    revenueByGoal,
+    totalRevenue,
   };
 }
 

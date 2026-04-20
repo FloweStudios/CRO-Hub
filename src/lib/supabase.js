@@ -151,7 +151,7 @@ export async function getGoals(clientId) {
   return { data, error };
 }
 
-export async function createGoal({ clientId, name, type, urlPattern, cssSelector, matchType }) {
+export async function createGoal({ clientId, name, type, urlPattern, cssSelector, matchType, goalValue }) {
   const { data, error } = await supabase
     .from('conversion_goals')
     .insert({
@@ -161,6 +161,7 @@ export async function createGoal({ clientId, name, type, urlPattern, cssSelector
       url_pattern:  urlPattern  || null,
       css_selector: cssSelector || null,
       match_type:   matchType   || 'exact',
+      goal_value:   goalValue   != null ? Number(goalValue) : null,
       active:       true,
     })
     .select()
@@ -178,7 +179,7 @@ export async function toggleGoal(id, active) {
   return { data, error };
 }
 
-export async function updateGoal(id, { name, type, cssSelector, urlPattern, matchType, active }) {
+export async function updateGoal(id, { name, type, cssSelector, urlPattern, matchType, active, goalValue }) {
   const { data, error } = await supabase
     .from('conversion_goals')
     .update({
@@ -187,6 +188,7 @@ export async function updateGoal(id, { name, type, cssSelector, urlPattern, matc
       css_selector: cssSelector ?? null,
       url_pattern:  urlPattern  ?? null,
       match_type:   matchType   ?? 'exact',
+      goal_value:   goalValue   != null ? Number(goalValue) : null,
       active,
     })
     .eq('id', id)

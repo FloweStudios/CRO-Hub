@@ -456,7 +456,8 @@ function OverviewPage({ partner, filter }) {
 
   return (
     <div className="overview-content">
-      <div className="stats-strip six">
+      <div className={`stats-strip ${data.totalRevenue > 0 ? 'seven' : 'six'}`}>
+        {data.totalRevenue > 0 && <StatBox label="Est. revenue" value={fmtMoney(data.totalRevenue)} highlight />}
         <StatBox label="Conversions" value={fmt(data.conversions)} delta={data.conversionsDelta} highlight />
         <StatBox label="Conv rate" value={data.convRate + '%'} delta={data.convRateDelta} highlight />
         <StatBox label="Sessions" value={fmt(data.sessions)} delta={data.sessionsDelta} />
@@ -503,7 +504,15 @@ function OverviewPage({ partner, filter }) {
             : Object.entries(data.conversionsByGoal).map(([name, count]) => (
               <div key={name} className="breakdown-row">
                 <span className="breakdown-goal-name">{name}</span>
-                <span className="breakdown-val">{count}</span>
+                <span className="breakdown-val-group">
+                  <span className="breakdown-val">{count}</span>
+                  {data.revenueByGoal[name] != null && (
+                    <span className="breakdown-sub">
+                      {fmtMoney(data.revenueByGoal[name])}
+                      {data.totalRevenue > 0 && ` · ${(data.revenueByGoal[name] / data.totalRevenue * 100).toFixed(0)}%`}
+                    </span>
+                  )}
+                </span>
               </div>
             ))
           }
@@ -745,6 +754,7 @@ function GoalModal({ clientId, goal, onClose, onSaved }) {
   });
   const [loading, setLoading]               = useState(false);
   const [error, setError]                   = useState('');
+  const [goalValue, setGoalValue]           = useState(goal?.goal_value != null ? String(goal.goal_value) : '');
 
   // Load form definitions when form_submit type is selected
   useEffect(() => {
@@ -783,7 +793,8 @@ function GoalModal({ clientId, goal, onClose, onSaved }) {
     }
 
     setLoading(true);
-    const payload = { name: name.trim(), type: type === 'click_url' ? 'click_url' : type, cssSelector, urlPattern: finalUrlPattern, matchType: finalMatchType, active };
+    const goalValueNum = goalValue.trim() !== '' ? parseFloat(goalValue) : null;
+    const payload = { name: name.trim(), type: type === 'click_url' ? 'click_url' : type, cssSelector, urlPattern: finalUrlPattern, matchType: finalMatchType, active, goalValue: goalValueNum };
     const { error: err } = isEdit
       ? await updateGoal(goal.id, payload)
       : await createGoal({ clientId, ...payload });
@@ -804,6 +815,15 @@ function GoalModal({ clientId, goal, onClose, onSaved }) {
           <div className="field">
             <label className="field-label">Goal name</label>
             <input className="field-input" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Phone click, Demo request, Purchase" required autoFocus />
+          </div>
+
+          <div className="field">
+            <label className="field-label">Conversion value <span style={{ color: 'var(--text3)', fontWeight: 400 }}>(optional)</span></label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ color: 'var(--text2)', fontSize: '0.95rem' }}>$</span>
+              <input className="field-input mono" style={{ maxWidth: 160 }} type="number" min="0" step="0.01" value={goalValue} onChange={e => setGoalValue(e.target.value)} placeholder="0.00" />
+            </div>
+            <span className="field-hint">Estimated revenue per conversion. Used to calculate total revenue in the overview.</span>
           </div>
 
           <div className="field">
@@ -1630,6 +1650,13 @@ function fmtTimeInTz(ts, tz) {
 
 function nowInTz(tz) {
   return new Date().toLocaleTimeString('en-CA', { timeZone: tz || 'UTC', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function fmtMoney(n) {
+  if (n == null) return '—';
+  if (n >= 1000000) return '$' + (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return '$' + (n / 1000).toFixed(1) + 'k';
+  return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
 function fmt(n) {
