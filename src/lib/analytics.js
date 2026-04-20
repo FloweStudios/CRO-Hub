@@ -215,6 +215,67 @@ function normUrl(raw) {
 
 // Fast version — only fetches pageviews + conversions, no time/scroll.
 // Used for the initial top-10 render. Returns top 10 sorted by conversions desc.
+export async function getEntryExitPages(clientId, filter = {}) {
+  const { since, until } = resolveRange(filter);
+  const { sources, mediums } = filter;
+
+  let sessionIdFilter = null;
+  if (sources?.length || mediums?.length) {
+    const { sessionIds } = await resolveSessionIds(clientId, since, until, sources, mediums);
+    sessionIdFilter = [...sessionIds];
+  }
+
+  // Entry pages come from sessions.landing_url — already stored, no event scan needed
+  let sessQuery = supabase.from('sessions').select('landing_url, session_id')
+    .eq('client_id', clientId).gte('created_at', since).lte('created_at', until)
+    .not('landing_url', 'is', null);
+  if (sessionIdFilter) sessQuery = sessQuery.in('session_id', sessionIdFilter);
+
+  // Exit pages: last pageview per session by ts
+  let pvQuery = supabase.from('events').select('url, session_id, ts')
+    .eq('client_id', clientId).eq('type', 'pageview')
+    .gte('created_at', since).lte('created_at', until);
+  if (sessionIdFilter) pvQuery = pvQuery.in('session_id', sessionIdFilter);
+
+  const [sessions, pvEvents] = await Promise.all([
+    fetchAllPages(sessQuery),
+    fetchAllPages(pvQuery),
+  ]);
+
+  // Entry counts
+  const entryCounts = {};
+  sessions.forEach(s => {
+    const url = normUrl(s.landing_url);
+    entryCounts[url] = (entryCounts[url] || 0) + 1;
+  });
+
+  // Exit counts — last pageview per session
+  const sessionLastPage = {};
+  pvEvents.forEach(ev => {
+    const url = normUrl(ev.url);
+    const ex = sessionLastPage[ev.session_id];
+    if (!ex || ev.ts > ex.ts) sessionLastPage[ev.session_id] = { url, ts: ev.ts };
+  });
+  const exitCounts = {};
+  Object.values(sessionLastPage).forEach(({ url }) => { exitCounts[url] = (exitCounts[url] || 0) + 1; });
+
+  const allUrls = new Set([...Object.keys(entryCounts), ...Object.keys(exitCounts)]);
+  const total = sessions.length;
+
+  const rows = [...allUrls].map(url => ({
+    url,
+    entries: entryCounts[url] || 0,
+    entryRate: total > 0 ? ((entryCounts[url] || 0) / total * 100).toFixed(1) : '0.0',
+    exits: exitCounts[url] || 0,
+    exitRate: total > 0 ? ((exitCounts[url] || 0) / total * 100).toFixed(1) : '0.0',
+  }));
+
+  return {
+    topEntries: [...rows].sort((a, b) => b.entries - a.entries).slice(0, 15),
+    topExits:   [...rows].sort((a, b) => b.exits   - a.exits  ).slice(0, 15),
+  };
+}
+
 export async function getTopPagesFast(clientId, filter = {}, device = null) {
   const { since, until } = resolveRange(filter);
   const { sources, mediums } = filter;

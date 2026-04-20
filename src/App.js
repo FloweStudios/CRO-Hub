@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase, signIn, signOut, onAuthChange, getPartners, createPartner, updatePartner, clearPartnerData, deletePartner, getGoals, createGoal, updateGoal, deleteGoal } from './lib/supabase';
 import { generateSnippet } from './lib/snippet';
-import { getOverview, getDailySeries, getTopPages, getTopPagesFast, getSources, getConversionPaths, getPageInfluence, getSessionPath, getFormAnalytics, getVisitorLatency } from './lib/analytics';
+import { getOverview, getDailySeries, getTopPages, getTopPagesFast, getEntryExitPages, getSources, getConversionPaths, getPageInfluence, getSessionPath, getFormAnalytics, getVisitorLatency } from './lib/analytics';
 import './App.css';
 import FormsPage from './pages/FormsPage';
 import { getConversionEvents, deleteConversionEvent } from './lib/supabase';
@@ -133,6 +133,7 @@ function Dashboard({ session }) {
                 { id: 'overview',    label: 'Overview',        icon: <IconChart /> },
                 { id: 'goals',       label: 'Conversions',      icon: <IconTarget /> },
                 { id: 'pages',       label: 'Top pages',        icon: <IconPages /> },
+                { id: 'entryexit',   label: 'Entry & Exit',     icon: <IconPages /> },
                 { id: 'sources',     label: 'Sources',          icon: <IconSource /> },
                 { id: 'paths',       label: 'Conversion paths', icon: <IconPath /> },
                 { id: 'forms',       label: 'Form analytics',   icon: <IconForm /> },
@@ -321,7 +322,7 @@ function PartnerShell({ partner, page, onBack, onDeleted }) {
 
   const filter = { dateFrom, dateTo, compFrom: showComp ? compFrom : '', compTo: showComp ? compTo : '', sources: selSources, mediums: selMediums };
 
-  const pages = { overview: OverviewPage, goals: GoalsPage, pages: TopPagesPage, sources: SourcesPage, paths: PathsPage, forms: FormsPage, latency: LatencyPage, snippet: SnippetPage, settings: SettingsPage };
+  const pages = { overview: OverviewPage, goals: GoalsPage, pages: TopPagesPage, entryexit: EntryExitPage, sources: SourcesPage, paths: PathsPage, forms: FormsPage, latency: LatencyPage, snippet: SnippetPage, settings: SettingsPage };
   const Page = pages[page] || OverviewPage;
 
   const activeSourceFilters = selSources.length + selMediums.length;
@@ -990,7 +991,6 @@ function TopPagesPage({ partner, filter }) {
               <SortTh col="avgScrollDepth" className="col-num">Avg scroll</SortTh>
               <SortTh col="conversions"    className="col-num">Convs</SortTh>
               <SortTh col="convRate"       className="col-num">Conv rate</SortTh>
-              <SortTh col="exitRate"       className="col-num">Exit rate</SortTh>
             </div>
             {sorted.length === 0 ? <div className="table-empty">No data for this period</div>
               : sorted.map((p, i) => (
@@ -1001,7 +1001,6 @@ function TopPagesPage({ partner, filter }) {
                   <span className="col-num">{p.avgScrollDepth != null ? `${p.avgScrollDepth}%` : '—'}</span>
                   <span className="col-num">{fmt(p.conversions)}</span>
                   <span className="col-num">{p.convRate}%</span>
-                  <span className="col-num">{p.exitRate != null ? `${p.exitRate}%` : '—'}</span>
                 </div>
               ))}
           </div>
@@ -1014,6 +1013,61 @@ function TopPagesPage({ partner, filter }) {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+// ─── Entry & Exit pages ───────────────────────────────────────────────────────
+
+function EntryExitPage({ partner, filter }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    getEntryExitPages(partner.id, filter).then(d => { setData(d); setLoading(false); });
+  }, [partner.id, JSON.stringify(filter)]); // eslint-disable-line
+
+  if (loading) return <div className="loading-state"><div className="spinner lg" /></div>;
+  if (!data) return null;
+
+  function PageTable({ rows, countLabel }) {
+    if (!rows.length) return <p className="empty-note">No data for this period.</p>;
+    return (
+      <div className="data-table">
+        <div className="table-head">
+          <span className="col-url">Page</span>
+          <span className="col-num">{countLabel}</span>
+          <span className="col-num">% of sessions</span>
+        </div>
+        {rows.map((r, i) => (
+          <div key={i} className="table-row">
+            <span className="col-url mono-sm">{r.url}</span>
+            <span className="col-num">{fmt(countLabel === 'Entries' ? r.entries : r.exits)}</span>
+            <span className="col-num">{countLabel === 'Entries' ? r.entryRate : r.exitRate}%</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="section-header">
+        <div><h3 className="section-title">Entry &amp; Exit pages</h3><p className="section-sub">Where sessions start and end</p></div>
+      </div>
+      <div className="two-col" style={{ alignItems: 'flex-start' }}>
+        <div className="info-card">
+          <h4 className="card-label">Top entry pages</h4>
+          <p className="settings-sub" style={{ marginBottom: 12 }}>First page visitors land on</p>
+          <PageTable rows={data.topEntries} countLabel="Entries" />
+        </div>
+        <div className="info-card">
+          <h4 className="card-label">Top exit pages</h4>
+          <p className="settings-sub" style={{ marginBottom: 12 }}>Last page before visitors leave</p>
+          <PageTable rows={data.topExits} countLabel="Exits" />
+        </div>
+      </div>
     </div>
   );
 }
