@@ -485,10 +485,47 @@ export async function getTopPages(clientId, filter = {}, device = null) {
   }).sort((a, b) => b.conversions - a.conversions);
 }
 
-// ── Sources ───────────────────────────────────────────────────────────────────
-// Conversions = conversion_events rows (not the boolean flag), so totals match
-// the goals tab and overview exactly.
+// Fast version — sessions + conversions only, no time_on_page scan. Top 10 by sessions.
+export async function getSourcesFast(clientId, filter = {}) {
+  const { since, until } = resolveRange(filter);
 
+  const [allSessions, convData] = await Promise.all([
+    fetchAllPages(supabase.from('sessions').select('session_id, utm_source, utm_medium, referrer_url').eq('client_id', clientId).gte('created_at', since).lte('created_at', until)),
+    fetchAllPages(supabase.from('conversion_events').select('session_id').eq('client_id', clientId).gte('created_at', since).lte('created_at', until)),
+  ]);
+
+  if (!allSessions.length) return [];
+
+  const convCountBySession = {};
+  convData.forEach(c => { convCountBySession[c.session_id] = (convCountBySession[c.session_id] || 0) + 1; });
+
+  const sourceMap = {};
+  allSessions.forEach(s => {
+    let source = 'Direct', medium = 'none';
+    if (s.utm_source) { source = s.utm_source; medium = s.utm_medium || 'none'; }
+    else if (s.referrer_url) {
+      try {
+        const host = new URL(s.referrer_url).hostname.replace('www.', '');
+        if (/google|bing|yahoo|duckduckgo/.test(host)) { source = 'Organic Search'; medium = 'organic'; }
+        else if (/facebook|instagram|twitter|linkedin|tiktok|pinterest/.test(host)) { source = 'Organic Social'; medium = 'social'; }
+        else { source = host; medium = 'referral'; }
+      } catch { source = 'Referral'; medium = 'referral'; }
+    }
+    const key = source + '|' + medium;
+    if (!sourceMap[key]) sourceMap[key] = { source, medium, sessions: 0, conversions: 0 };
+    sourceMap[key].sessions++;
+    sourceMap[key].conversions += (convCountBySession[s.session_id] || 0);
+  });
+
+  return Object.values(sourceMap).map(s => ({
+    source: s.source, medium: s.medium, sessions: s.sessions,
+    avgSessionLengthMs: null,
+    conversions: s.conversions,
+    convRate: s.sessions > 0 ? (s.conversions / s.sessions * 100).toFixed(1) : '0.0',
+  })).sort((a, b) => b.sessions - a.sessions).slice(0, 10);
+}
+
+// Full version — includes avg session length from time_on_page events.
 export async function getSources(clientId, filter = {}) {
   const { since, until } = resolveRange(filter);
 

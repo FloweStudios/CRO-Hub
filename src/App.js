@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase, signIn, signOut, onAuthChange, getPartners, createPartner, updatePartner, clearPartnerData, deletePartner, getGoals, createGoal, updateGoal, deleteGoal } from './lib/supabase';
 import { generateSnippet } from './lib/snippet';
-import { getOverview, getDailySeries, getTopPages, getTopPagesFast, getEntryExitPages, getSources, getConversionPaths, getPageInfluence, getSessionPath, getFormAnalytics, getVisitorLatency, getRevenueBreakdown } from './lib/analytics';
+import { getOverview, getDailySeries, getTopPages, getTopPagesFast, getEntryExitPages, getSources, getSourcesFast, getConversionPaths, getPageInfluence, getSessionPath, getFormAnalytics, getVisitorLatency, getRevenueBreakdown } from './lib/analytics';
 import './App.css';
 import FormsPage from './pages/FormsPage';
 import { getConversionEvents, deleteConversionEvent } from './lib/supabase';
@@ -1160,13 +1160,21 @@ function EntryExitPage({ partner, filter }) {
 function SourcesPage({ partner, filter }) {
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingAll, setLoadingAll] = useState(false);
+  const [allLoaded, setAllLoaded] = useState(false);
   const [sortCol, setSortCol] = useState('sessions');
   const [sortDir, setSortDir] = useState('desc');
 
   useEffect(() => {
     setLoading(true);
-    getSources(partner.id, filter).then(data => { setSources(data); setLoading(false); });
+    setAllLoaded(false);
+    getSourcesFast(partner.id, filter).then(data => { setSources(data); setLoading(false); });
   }, [partner.id, JSON.stringify(filter)]); // eslint-disable-line
+
+  function handleLoadAll() {
+    setLoadingAll(true);
+    getSources(partner.id, filter).then(data => { setSources(data); setLoadingAll(false); setAllLoaded(true); });
+  }
 
   function handleSort(col) {
     if (sortCol === col) { setSortDir(d => d === 'desc' ? 'asc' : 'desc'); }
@@ -1194,30 +1202,39 @@ function SourcesPage({ partner, filter }) {
   return (
     <div>
       <div className="section-header">
-        <div><h3 className="section-title">Traffic sources</h3><p className="section-sub">Click a column header to sort</p></div>
+        <div><h3 className="section-title">Traffic sources</h3><p className="section-sub">Top 10 by sessions · click a column to sort</p></div>
       </div>
       {loading ? <div className="loading-state"><div className="spinner lg" /></div> : (
-        <div className="data-table">
-          <div className="table-head">
-            <SortTh col="source"             className="col-source">Source</SortTh>
-            <SortTh col="medium"             className="col-medium">Medium</SortTh>
-            <SortTh col="sessions"           className="col-num">Sessions</SortTh>
-            <SortTh col="avgSessionLengthMs" className="col-num">Avg time</SortTh>
-            <SortTh col="conversions"        className="col-num">Convs</SortTh>
-            <SortTh col="convRate"           className="col-num">Conv rate</SortTh>
+        <>
+          <div className="data-table">
+            <div className="table-head">
+              <SortTh col="source"             className="col-source">Source</SortTh>
+              <SortTh col="medium"             className="col-medium">Medium</SortTh>
+              <SortTh col="sessions"           className="col-num">Sessions</SortTh>
+              <SortTh col="avgSessionLengthMs" className="col-num">Avg time</SortTh>
+              <SortTh col="conversions"        className="col-num">Convs</SortTh>
+              <SortTh col="convRate"           className="col-num">Conv rate</SortTh>
+            </div>
+            {sorted.length === 0 ? <div className="table-empty">No data for this period</div>
+              : sorted.map((s, i) => (
+                <div key={i} className="table-row">
+                  <span className="col-source">{s.source}</span>
+                  <span className="col-medium"><span className={`medium-pill medium-${s.medium}`}>{s.medium}</span></span>
+                  <span className="col-num">{fmt(s.sessions)}</span>
+                  <span className="col-num">{s.avgSessionLengthMs != null ? fmtTime(Math.round(s.avgSessionLengthMs / 1000)) : '—'}</span>
+                  <span className="col-num">{fmt(s.conversions)}</span>
+                  <span className="col-num">{s.convRate}%</span>
+                </div>
+              ))}
           </div>
-          {sorted.length === 0 ? <div className="table-empty">No data for this period</div>
-            : sorted.map((s, i) => (
-              <div key={i} className="table-row">
-                <span className="col-source">{s.source}</span>
-                <span className="col-medium"><span className={`medium-pill medium-${s.medium}`}>{s.medium}</span></span>
-                <span className="col-num">{fmt(s.sessions)}</span>
-                <span className="col-num">{s.avgSessionLengthMs != null ? fmtTime(Math.round(s.avgSessionLengthMs / 1000)) : '—'}</span>
-                <span className="col-num">{fmt(s.conversions)}</span>
-                <span className="col-num">{s.convRate}%</span>
-              </div>
-            ))}
-        </div>
+          {!allLoaded && (
+            <div style={{ textAlign: 'center', padding: '16px 0' }}>
+              <button className="btn-ghost" onClick={handleLoadAll} disabled={loadingAll}>
+                {loadingAll ? <><span className="spinner" style={{ marginRight: 8 }} />Loading all sources…</> : 'Load all sources with avg time'}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
