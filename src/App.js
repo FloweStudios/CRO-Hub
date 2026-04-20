@@ -1162,7 +1162,7 @@ function SourcesPage({ partner, filter }) {
   const [loading, setLoading] = useState(true);
   const [loadingAll, setLoadingAll] = useState(false);
   const [allLoaded, setAllLoaded] = useState(false);
-  const [sortCol, setSortCol] = useState('sessions');
+  const [sortCol, setSortCol] = useState('conversions');
   const [sortDir, setSortDir] = useState('desc');
 
   useEffect(() => {

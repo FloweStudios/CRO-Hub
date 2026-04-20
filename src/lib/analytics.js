@@ -522,7 +522,7 @@ export async function getSourcesFast(clientId, filter = {}) {
     avgSessionLengthMs: null,
     conversions: s.conversions,
     convRate: s.sessions > 0 ? (s.conversions / s.sessions * 100).toFixed(1) : '0.0',
-  })).sort((a, b) => b.sessions - a.sessions).slice(0, 10);
+  })).sort((a, b) => b.conversions - a.conversions).slice(0, 10);
 }
 
 // Full version — includes avg session length from time_on_page events.
@@ -751,55 +751,59 @@ export async function getVisitorLatency(clientId, filter = {}) {
   const { since, until } = resolveRange(filter);
   const { sources, mediums } = filter;
 
-  // Build latency from raw data so date range and source filter work correctly.
-  // The visitor_conversion_latency view has no date/source columns so we bypass it.
-  const [allSessions, convData] = await Promise.all([
-    fetchAllPages(supabase.from('sessions').select('session_id, visitor_id, utm_source, utm_medium, created_at, converted').eq('client_id', clientId).gte('created_at', since).lte('created_at', until)),
-    fetchAllPages(supabase.from('conversion_events').select('session_id, created_at').eq('client_id', clientId).gte('created_at', since).lte('created_at', until)),
-  ]);
+  // Fetch conversions within the date window
+  const convData = await fetchAllPages(
+    supabase.from('conversion_events').select('session_id, created_at').eq('client_id', clientId).gte('created_at', since).lte('created_at', until)
+  );
+  if (!convData.length) return { avgSessions: 0, avgHours: 0, distribution: [], totalConverters: 0 };
 
-  if (!allSessions.length) return { avgSessions: 0, avgHours: 0, distribution: [], totalConverters: 0 };
+  // Fetch in-window sessions to apply source/medium filter and get visitor IDs
+  const inWindowSessions = await fetchAllPages(
+    supabase.from('sessions').select('session_id, visitor_id, utm_source, utm_medium, created_at').eq('client_id', clientId).gte('created_at', since).lte('created_at', until)
+  );
 
-  // Apply source/medium filter
   const filteredSessions = (sources?.length || mediums?.length)
-    ? allSessions.filter(s => {
+    ? inWindowSessions.filter(s => {
         const srcOk = !sources?.length || sources.includes(s.utm_source || 'direct');
         const medOk = !mediums?.length || mediums.includes(s.utm_medium || 'none');
         return srcOk && medOk;
       })
-    : allSessions;
+    : inWindowSessions;
 
-  // Map session_id -> visitor_id for filtered sessions
+  const filteredSessionIds = new Set(filteredSessions.map(s => s.session_id));
   const sessionToVisitor = {};
   filteredSessions.forEach(s => { sessionToVisitor[s.session_id] = s.visitor_id; });
-  const filteredSessionIds = new Set(filteredSessions.map(s => s.session_id));
 
-  // Find converting sessions that pass filter
+  // Find converting sessions that pass the filter
   const convertingSessionIds = new Set(
-    convData
-      .filter(c => filteredSessionIds.has(c.session_id))
-      .map(c => c.session_id)
+    convData.filter(c => filteredSessionIds.has(c.session_id)).map(c => c.session_id)
   );
-
   if (convertingSessionIds.size === 0) return { avgSessions: 0, avgHours: 0, distribution: [], totalConverters: 0 };
 
-  // Group all filtered sessions by visitor_id
+  // Get all unique visitor IDs who converted
+  const convertingVisitorIds = [...new Set([...convertingSessionIds].map(sid => sessionToVisitor[sid]).filter(Boolean))];
+
+  // Fetch ALL sessions for these visitors (full history, not just in-window)
+  // so we can correctly count sessions before conversion
+  const allVisitorSessions = await fetchAllPages(
+    supabase.from('sessions').select('session_id, visitor_id, created_at').eq('client_id', clientId).in('visitor_id', convertingVisitorIds)
+  );
+
   const visitorSessions = {};
-  filteredSessions.forEach(s => {
+  allVisitorSessions.forEach(s => {
     if (!visitorSessions[s.visitor_id]) visitorSessions[s.visitor_id] = [];
     visitorSessions[s.visitor_id].push(s);
   });
 
-  // For each visitor who converted, compute total sessions before conversion and time span
   const converterData = [];
   convertingSessionIds.forEach(sid => {
     const vid = sessionToVisitor[sid];
     if (!vid) return;
-    const allVisitorSessions = (visitorSessions[vid] || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-    const convIdx = allVisitorSessions.findIndex(s => s.session_id === sid);
-    const sessionsToConvert = convIdx >= 0 ? convIdx + 1 : allVisitorSessions.length;
-    const firstSeen = new Date(allVisitorSessions[0]?.created_at);
-    const convTime  = new Date(allVisitorSessions[convIdx >= 0 ? convIdx : 0]?.created_at);
+    const history = (visitorSessions[vid] || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    const convIdx = history.findIndex(s => s.session_id === sid);
+    const sessionsToConvert = convIdx >= 0 ? convIdx + 1 : history.length;
+    const firstSeen = new Date(history[0]?.created_at);
+    const convTime  = new Date(history[convIdx >= 0 ? convIdx : 0]?.created_at);
     const hoursToConversion = (convTime - firstSeen) / 3600000;
     converterData.push({ sessions: sessionsToConvert, hours: hoursToConversion });
   });
