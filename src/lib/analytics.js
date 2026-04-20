@@ -668,11 +668,11 @@ export async function getSessionPath(clientId, sessionId) {
   const order = [];
   events.forEach(ev => {
     const path = ev.url.replace(/^https?:\/\/[^/]+/, '').replace(/\?.*/, '') || '/';
-    if (ev.type === 'pageview' && !pages[path]) { pages[path] = { path, ts: ev.ts, timeMs: null, maxDepth: null }; order.push(path); }
-    if (ev.type === 'time_on_page' && ev.time_on_page_ms && pages[path]) pages[path].timeMs = ev.time_on_page_ms;
+    if (ev.type === 'pageview' && !pages[path]) { pages[path] = { path, ts: ev.ts, timeMs: 0, hasTime: false, maxDepth: null }; order.push(path); }
+    if (ev.type === 'time_on_page' && ev.time_on_page_ms && pages[path]) { pages[path].timeMs += ev.time_on_page_ms; pages[path].hasTime = true; }
     if (ev.type === 'scroll_depth' && ev.depth_pct && pages[path]) pages[path].maxDepth = Math.max(pages[path].maxDepth || 0, ev.depth_pct);
   });
-  return order.map(p => pages[p]);
+  return order.map(p => ({ ...pages[p], timeMs: pages[p].hasTime ? pages[p].timeMs : null }));
 }
 
 // ── Form analytics ────────────────────────────────────────────────────────────
