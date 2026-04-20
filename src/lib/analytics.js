@@ -38,6 +38,7 @@ async function resolveSessionIds(clientId, since, until, sources, mediums) {
       .eq('client_id', clientId)
       .gte('created_at', since)
       .lte('created_at', until)
+      .order('created_at', { ascending: true })
       .range(from, from + PAGE - 1);
     if (error || !data?.length) break;
     all = all.concat(data);
@@ -64,8 +65,11 @@ async function resolveSessionIds(clientId, since, until, sources, mediums) {
 async function fetchAllPages(query) {
   const PAGE = 1000;
   let rows = [], from = 0;
+  // Ensure stable pagination order — without ORDER BY, Supabase may return
+  // different rows on each page request causing duplicates or missing rows.
+  const orderedQuery = query.order('created_at', { ascending: true });
   while (true) {
-    const { data, error } = await query.range(from, from + PAGE - 1);
+    const { data, error } = await orderedQuery.range(from, from + PAGE - 1);
     if (error || !data?.length) break;
     rows = rows.concat(data);
     if (data.length < PAGE) break;
